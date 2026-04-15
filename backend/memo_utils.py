@@ -6,29 +6,42 @@ from datetime import datetime, timedelta
 import random
 from typing import Dict, List, Any
 
-# --- Load Configuration ---
+# --- Load Configuration (with hot-reload) ---
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(ROOT_DIR, "config.json")
 
+_config_cache = {}
+_config_mtime = 0
+
 def _load_config() -> dict:
-    """Load configuration from config.json"""
+    """Load configuration from config.json, auto-reload on file change."""
+    global _config_cache, _config_mtime
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+        mtime = os.path.getmtime(CONFIG_PATH)
+        if mtime != _config_mtime:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                _config_cache = json.load(f)
+            _config_mtime = mtime
     except Exception:
-        return {}
+        _config_cache = {}
+    return _config_cache
 
-_config = _load_config()
+def get_scan_paths() -> List[str]:
+    """Get scan paths from config (hot-reloaded)."""
+    config = _load_config()
+    return [os.path.expanduser(p) for p in config.get("scan_paths", [])]
 
-# Resolve paths from config (support ~ expansion)
-SCAN_PATHS = [os.path.expanduser(p) for p in _config.get("scan_paths", [])]
-CORE_MEM_FILE = os.path.expanduser(_config.get("core_memory_file", ""))
+def get_core_mem_file() -> str:
+    """Get core memory file path from config (hot-reloaded)."""
+    config = _load_config()
+    return os.path.expanduser(config.get("core_memory_file", ""))
 
 def get_all_md_files() -> List[str]:
     md_files = []
-    if os.path.exists(CORE_MEM_FILE):
-        md_files.append(CORE_MEM_FILE)
-    for path in SCAN_PATHS:
+    core_mem = get_core_mem_file()
+    if core_mem and os.path.exists(core_mem):
+        md_files.append(core_mem)
+    for path in get_scan_paths():
         path = path.strip()
         if not path or not os.path.exists(path): continue
         for root, dirs, files in os.walk(path):
@@ -63,14 +76,31 @@ def extract_memo_from_file(file_path: str) -> str:
 def build_memory_graph() -> Dict[str, Any]:
     nodes = []
     links = []
-    file_map = {} 
+    file_map = {}
     all_files = get_all_md_files()
+    scan_paths = get_scan_paths()
+    core_mem = get_core_mem_file()
+
+    # Build group labels: 0 = Core, 1..N = scan paths (by folder name)
+    group_labels = {0: "Core (MEMORY)"}
+    for i, sp in enumerate(scan_paths):
+        folder_name = os.path.basename(os.path.normpath(sp))
+        group_labels[i + 1] = folder_name
+
+    def _get_group(path: str) -> int:
+        """Determine group index by matching scan path."""
+        norm_path = os.path.normpath(path)
+        if core_mem and os.path.normpath(core_mem) == norm_path:
+            return 0
+        for i, sp in enumerate(scan_paths):
+            if norm_path.startswith(os.path.normpath(sp)):
+                return i + 1
+        return len(scan_paths)  # fallback group
+
     for path in all_files:
         name = os.path.basename(path).replace(".md", "").strip()
         file_map[name] = path
-        # 1 for workspace, 2 for external/archive
-        group = 1 if ".openclaw" in path.lower() else 2
-        # File size in bytes for frontend node scaling
+        group = _get_group(path)
         try:
             file_size = os.path.getsize(path)
         except Exception:
@@ -93,4 +123,4 @@ def build_memory_graph() -> Dict[str, Any]:
         for node in nodes:
             if node["id"] != "MEMORY":
                 links.append({"source": "MEMORY", "target": node["id"], "value": 0.5})
-    return {"nodes": nodes, "links": links}
+    return {"nodes": nodes, "links": links, "groups": group_labels}

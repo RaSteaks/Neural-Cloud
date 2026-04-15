@@ -264,9 +264,7 @@
         <input type="text" id="search-input" placeholder="Search Neural Synapses..." autocomplete="off">
         <div class="glass-box">
             <div class="config-title">Filters</div>
-            <label class="filter-label"><input type="checkbox" id="filter-core" checked> Core (MEMORY)</label>
-            <label class="filter-label"><input type="checkbox" id="filter-logs" checked> Logs</label>
-            <label class="filter-label"><input type="checkbox" id="filter-assets" checked> Assets</label>
+            <div id="filter-list"></div>
             
             <div id="node-config" style="display:none; border-top: 1px solid var(--border); margin-top:12px; padding-top:12px;">
                 <div class="config-title">Node Color</div>
@@ -311,7 +309,13 @@
             .force("center", d3.forceCenter(width / 2, height / 2))
             .force("collision", d3.forceCollide().radius(d => (d.r || 8) + 30));
 
+        let groupLabels = {};
+
         d3.json("/api/graph").then(graph => {
+            // Store group labels and build dynamic filters
+            groupLabels = graph.groups || {};
+            buildFilterUI(groupLabels);
+
             // Compute node radius based on file size using sqrt scale, capped below MEMORY node
             const MEMORY_RADIUS = 22;
             const sizes = graph.nodes.map(n => n.size || 0);
@@ -345,7 +349,7 @@
                 
                 el.select("circle")
                     .attr("r", d.r || 8)
-                    .attr("fill", d.customColor || (d.id === "MEMORY" ? "var(--gold)" : (d.group === 1 ? "#42b983" : "#3498db")))
+                    .attr("fill", d.customColor || (d.id === "MEMORY" ? "var(--gold)" : (d.group === 0 ? "var(--gold)" : (d.group % 2 === 1 ? "#42b983" : "#3498db"))))
                     .classed("selected", d.id === selectedId);
 
                 el.select("text").text(d.id.length > 25 ? d.id.substr(0,22)+'...' : d.id);
@@ -397,7 +401,7 @@
                 };
             });
 
-            ["filter-core","filter-logs","filter-assets"].forEach(id => document.getElementById(id).addEventListener("change", updateFilter));
+            ["filter-core","filter-logs","filter-assets"].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener("change", updateFilter); });
             document.getElementById("search-input").oninput = (e) => {
                 const term = e.target.value.toLowerCase();
                 const target = allNodesData.find(n => n.id.toLowerCase().includes(term));
@@ -426,9 +430,26 @@
             }
         }
 
+        function buildFilterUI(groups) {
+            const container = document.getElementById("filter-list");
+            container.innerHTML = '';
+            const groupColors = ['var(--gold)', '#42b983', '#3498db', '#e74c3c', '#9b59b6', '#f1c40f'];
+            Object.entries(groups).forEach(([gid, label]) => {
+                const el = document.createElement('label');
+                el.className = 'filter-label';
+                const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${groupColors[gid] || '#888'};margin-right:4px;"></span>`;
+                el.innerHTML = `<input type="checkbox" data-group="${gid}" checked> ${dot}${label}`;
+                el.querySelector('input').addEventListener('change', updateFilter);
+                container.appendChild(el);
+            });
+        }
+
         function updateFilter() {
-            const showC = document.getElementById("filter-core").checked, showL = document.getElementById("filter-logs").checked, showA = document.getElementById("filter-assets").checked;
-            curNodes = allNodesData.filter(n => (n.id==="MEMORY"?showC : (n.group===1?showL : showA)));
+            const checkedGroups = new Set();
+            document.querySelectorAll('#filter-list input[type=checkbox]').forEach(cb => {
+                if (cb.checked) checkedGroups.add(Number(cb.dataset.group));
+            });
+            curNodes = allNodesData.filter(n => checkedGroups.has(n.group));
             const ids = new Set(curNodes.map(n => n.id));
             curLinks = JSON.parse(JSON.stringify(allLinksData)).filter(l => ids.has(l.source) && ids.has(l.target));
             renderGraph(curNodes, curLinks);
