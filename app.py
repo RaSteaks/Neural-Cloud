@@ -91,6 +91,37 @@ def api_pdf():
         return send_from_directory(os.path.dirname(p), os.path.basename(p))
     return "404", 404
 
+@app.route("/api/config", methods=["GET"])
+def get_config():
+    """Read config.json"""
+    config_path = os.path.join(ROOT_DIR, "config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return jsonify(json.load(f))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/config", methods=["POST"])
+def save_config():
+    """Write config.json"""
+    config_path = os.path.join(ROOT_DIR, "config.json")
+    try:
+        data = request.get_json()
+        if not data or "scan_paths" not in data:
+            return jsonify({"error": "Invalid config: scan_paths required"}), 400
+        # Validate: scan_paths must be a list of strings
+        if not isinstance(data["scan_paths"], list):
+            return jsonify({"error": "scan_paths must be a list"}), 400
+        config = {
+            "scan_paths": [str(p).strip() for p in data["scan_paths"] if str(p).strip()],
+            "core_memory_file": str(data.get("core_memory_file", "")).strip()
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     # Check config.json on startup, create default if missing
     config_path = os.path.join(ROOT_DIR, "config.json")

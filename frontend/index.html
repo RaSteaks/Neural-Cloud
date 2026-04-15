@@ -259,6 +259,154 @@
             animation: spin 0.6s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* === Settings Button === */
+        #settings-btn {
+            position: fixed; bottom: 24px; right: 24px;
+            width: 48px; height: 48px;
+            border-radius: 50%;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 22px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            transition: all var(--transition-fast);
+            z-index: 200;
+        }
+        #settings-btn:hover { color: var(--accent); border-color: var(--accent); transform: rotate(45deg); }
+        #settings-btn:active { transform: scale(0.92); }
+
+        /* === Settings Modal === */
+        #settings-overlay {
+            display: none; position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.55);
+            z-index: 2000;
+            align-items: center; justify-content: center;
+        }
+        #settings-overlay.open { display: flex; }
+
+        #settings-modal {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            width: 480px; max-width: calc(100vw - 32px);
+            max-height: calc(100dvh - 64px);
+            display: flex; flex-direction: column;
+            backdrop-filter: blur(25px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+            overflow: hidden;
+        }
+
+        .settings-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .settings-header h3 { margin: 0; font-size: 16px; font-weight: 600; }
+
+        .settings-body {
+            padding: 20px 24px;
+            overflow-y: auto; flex: 1;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .settings-section { margin-bottom: 20px; }
+        .settings-section-title {
+            font-size: 11px; color: var(--accent);
+            text-transform: uppercase; letter-spacing: 1.2px;
+            font-weight: 600; margin-bottom: 10px;
+        }
+
+        .path-list { list-style: none; margin: 0; padding: 0; }
+        .path-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; margin-bottom: 6px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 13px; color: var(--text-primary);
+            word-break: break-all;
+        }
+        .path-item span { flex: 1; min-width: 0; }
+        .path-item button {
+            background: none; border: none;
+            color: #e74c3c; cursor: pointer;
+            font-size: 16px; padding: 4px 8px;
+            border-radius: 4px;
+            transition: background var(--transition-fast);
+            flex-shrink: 0;
+        }
+        .path-item button:hover { background: rgba(231,76,60,0.15); }
+
+        .path-add-row {
+            display: flex; gap: 8px; margin-top: 8px;
+        }
+        .path-add-row input {
+            flex: 1; padding: 10px 14px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: #fff; font-size: 13px;
+            outline: none;
+        }
+        .path-add-row input:focus { border-color: var(--accent); }
+        .path-add-row button {
+            padding: 10px 16px;
+            background: rgba(0,255,204,0.1);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            border-radius: var(--radius-sm);
+            cursor: pointer; font-size: 13px; font-weight: 500;
+            white-space: nowrap;
+            transition: all var(--transition-fast);
+        }
+        .path-add-row button:hover { background: var(--accent); color: #000; }
+
+        .settings-input {
+            width: 100%; padding: 10px 14px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: #fff; font-size: 13px;
+            outline: none;
+        }
+        .settings-input:focus { border-color: var(--accent); }
+
+        .settings-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border);
+            display: flex; gap: 8px; justify-content: flex-end;
+        }
+
+        .settings-toast {
+            position: fixed; bottom: 80px; right: 24px;
+            padding: 10px 20px;
+            background: var(--accent); color: #000;
+            border-radius: var(--radius-sm);
+            font-size: 13px; font-weight: 500;
+            opacity: 0; transition: opacity 0.25s ease;
+            z-index: 3000;
+        }
+        .settings-toast.show { opacity: 1; }
+
+        @media (max-width: 768px) {
+            #settings-btn {
+                bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+                right: 16px;
+            }
+            #settings-modal {
+                width: 100%; max-width: 100%;
+                height: 100dvh; max-height: 100dvh;
+                border-radius: 0;
+            }
+            .settings-toast {
+                bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+                right: 16px; left: 16px;
+                text-align: center;
+            }
+        }
     </style>
 </head>
 <body>
@@ -298,6 +446,38 @@
     </div>
     
     <svg id="graph"></svg>
+
+    <!-- Settings Button -->
+    <button id="settings-btn" onclick="openSettings()" aria-label="Settings">&#9881;</button>
+
+    <!-- Settings Modal -->
+    <div id="settings-overlay" onclick="if(event.target===this)closeSettings()">
+        <div id="settings-modal">
+            <div class="settings-header">
+                <h3>Settings</h3>
+                <button class="btn btn-close" onclick="closeSettings()">CLOSE</button>
+            </div>
+            <div class="settings-body">
+                <div class="settings-section">
+                    <div class="settings-section-title">Scan Paths</div>
+                    <ul class="path-list" id="path-list"></ul>
+                    <div class="path-add-row">
+                        <input type="text" id="new-path-input" placeholder="Enter path, e.g. ~/notes">
+                        <button onclick="addPath()">Add</button>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-section-title">Core Memory File</div>
+                    <input type="text" class="settings-input" id="core-mem-input" placeholder="e.g. ~/.openclaw/workspace/MEMORY.md">
+                </div>
+            </div>
+            <div class="settings-footer">
+                <button class="btn" onclick="closeSettings()">Cancel</button>
+                <button class="btn" style="background:var(--accent);color:#000;border-color:var(--accent)" onclick="saveSettings()">Save</button>
+            </div>
+        </div>
+    </div>
+    <div class="settings-toast" id="settings-toast"></div>
 
     <script>
         const svg = d3.select("#graph"), width = window.innerWidth, height = window.innerHeight;
@@ -482,6 +662,102 @@
         function dragstarted(e,d){ if(!e.active) simulation.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; }
         function dragged(e,d){ d.fx=e.x; d.fy=e.y; }
         function dragended(e,d){ if(!e.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; }
+
+        // === Settings Panel Logic ===
+        let _settingsPaths = [];
+
+        async function openSettings() {
+            try {
+                const res = await fetch('/api/config');
+                const config = await res.json();
+                _settingsPaths = [...(config.scan_paths || [])];
+                document.getElementById('core-mem-input').value = config.core_memory_file || '';
+                renderPathList();
+                document.getElementById('settings-overlay').classList.add('open');
+            } catch (err) {
+                showToast('Failed to load config');
+            }
+        }
+
+        function closeSettings() {
+            document.getElementById('settings-overlay').classList.remove('open');
+        }
+
+        function renderPathList() {
+            const list = document.getElementById('path-list');
+            list.innerHTML = '';
+            _settingsPaths.forEach((p, i) => {
+                const li = document.createElement('li');
+                li.className = 'path-item';
+                li.innerHTML = `<span>${p}</span><button onclick="removePath(${i})" aria-label="Remove">&times;</button>`;
+                list.appendChild(li);
+            });
+        }
+
+        function addPath() {
+            const input = document.getElementById('new-path-input');
+            const val = input.value.trim();
+            if (val && !_settingsPaths.includes(val)) {
+                _settingsPaths.push(val);
+                renderPathList();
+                input.value = '';
+            }
+        }
+
+        function removePath(index) {
+            _settingsPaths.splice(index, 1);
+            renderPathList();
+        }
+
+        async function saveSettings() {
+            const config = {
+                scan_paths: _settingsPaths,
+                core_memory_file: document.getElementById('core-mem-input').value.trim()
+            };
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    closeSettings();
+                    showToast('Config saved. Refreshing...');
+                    setTimeout(() => refreshGraph(), 500);
+                } else {
+                    showToast('Error: ' + (data.error || 'Unknown'));
+                }
+            } catch (err) {
+                showToast('Save failed');
+            }
+        }
+
+        function refreshGraph() {
+            d3.json('/api/graph').then(graph => {
+                groupLabels = graph.groups || {};
+                buildFilterUI(groupLabels);
+                const MEMORY_RADIUS = 22;
+                const sizes = graph.nodes.map(n => n.size || 0);
+                const maxSize = Math.max(...sizes, 1);
+                const sizeScale = d3.scaleSqrt().domain([0, maxSize]).range([5, MEMORY_RADIUS - 2]).clamp(true);
+                allNodesData = graph.nodes.map(n => ({...n, customColor: null, r: n.id === 'MEMORY' ? MEMORY_RADIUS : sizeScale(n.size || 0)}));
+                allLinksData = graph.links;
+                updateFilter();
+            });
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('settings-toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        // Enter key to add path
+        document.getElementById('new-path-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addPath();
+        });
     </script>
 </body>
 </html>
