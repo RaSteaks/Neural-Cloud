@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 import os
 import re
+import json
 from datetime import datetime, timedelta
 import random
 from typing import Dict, List, Any
 
-# --- Dynamic Path Resolution ---
-# Use expanduser to avoid hardcoding local Windows username
-BASE_USER_PATH = os.path.expanduser("~")
-DEFAULT_MEMORY_PATH = os.path.join(BASE_USER_PATH, ".openclaw", "workspace", "memory")
-DEFAULT_CORE_MEM_FILE = os.path.join(BASE_USER_PATH, ".openclaw", "workspace", "MEMORY.md")
+# --- Load Configuration ---
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_PATH = os.path.join(ROOT_DIR, "config.json")
 
-# Allow override via environment variables for D drive or custom paths
-SCAN_PATHS = os.environ.get("STAR_SCAN_PATHS", "").split(",")
-if not any(SCAN_PATHS):
-    # Fallback to current machine defaults if no env var provided
-    SCAN_PATHS = [DEFAULT_MEMORY_PATH, r"D:\openclaw\color_science_documents"]
+def _load_config() -> dict:
+    """Load configuration from config.json"""
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-CORE_MEM_FILE = os.environ.get("STAR_CORE_MEM", DEFAULT_CORE_MEM_FILE)
+_config = _load_config()
+
+# Resolve paths from config (support ~ expansion)
+SCAN_PATHS = [os.path.expanduser(p) for p in _config.get("scan_paths", [])]
+CORE_MEM_FILE = os.path.expanduser(_config.get("core_memory_file", ""))
 
 def get_all_md_files() -> List[str]:
     md_files = []
@@ -65,7 +70,12 @@ def build_memory_graph() -> Dict[str, Any]:
         file_map[name] = path
         # 1 for workspace, 2 for external/archive
         group = 1 if ".openclaw" in path.lower() else 2
-        nodes.append({"id": name, "group": group})
+        # File size in bytes for frontend node scaling
+        try:
+            file_size = os.path.getsize(path)
+        except Exception:
+            file_size = 0
+        nodes.append({"id": name, "group": group, "size": file_size})
 
     link_pattern = re.compile(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]')
     for name, path in file_map.items():
