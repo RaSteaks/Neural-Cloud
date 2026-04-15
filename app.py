@@ -69,6 +69,56 @@ def api_content():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/content/stream")
+def api_content_stream():
+    """Streaming content for large files"""
+    node_id = request.args.get("id")
+    if not node_id: return jsonify({"error": "No ID"}), 400
+
+    decoded_id = urllib.parse.unquote(node_id).strip()
+    from backend.memo_utils import get_all_md_files
+    files = get_all_md_files()
+
+    target = next((p for p in files if os.path.basename(p).replace(".md", "").strip() in [decoded_id, decoded_id.replace(" ",""), node_id]), None)
+    if not target: return jsonify({"error": f"NodeNotFound: {decoded_id}"}), 404
+
+    CHUNK_LINES = 40
+
+    def img_replacer(match):
+        try:
+            alt, img_p = match.group(1), match.group(2)
+            img_p_u = urllib.parse.unquote(img_p)
+            full_p = img_p_u if ":" in img_p_u or img_p_u.startswith(("/", "\\")) else os.path.abspath(os.path.join(os.path.dirname(target), img_p_u))
+            return f'![{alt}](/api/image?path={urllib.parse.quote(full_p)})'
+        except: return match.group(0)
+
+    def generate():
+        try:
+            # Send metadata first
+            pdf_link = None
+            bn = os.path.basename(target).replace(".md", "")
+            for p_pdf in [os.path.join(os.path.dirname(target), bn+".pdf"), os.path.join(os.path.dirname(os.path.dirname(target)), bn+".pdf")]:
+                if os.path.exists(p_pdf):
+                    pdf_link = f"/api/pdf?path={urllib.parse.quote(p_pdf)}"
+                    break
+            yield json.dumps({"type": "meta", "id": decoded_id, "pdf_link": pdf_link}) + "\n"
+
+            with open(target, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            # Stream in chunks
+            for i in range(0, len(lines), CHUNK_LINES):
+                chunk = "".join(lines[i:i+CHUNK_LINES])
+                chunk = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', img_replacer, chunk)
+                yield json.dumps({"type": "chunk", "content": chunk}) + "\n"
+
+            yield json.dumps({"type": "done"}) + "\n"
+        except Exception as e:
+            yield json.dumps({"type": "error", "error": str(e)}) + "\n"
+
+    return Response(generate(), mimetype="application/x-ndjson",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
 @app.route("/api/image")
 def api_image():
     """Media Proxy Hub"""

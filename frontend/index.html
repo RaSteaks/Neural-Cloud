@@ -668,16 +668,57 @@
             if (isMobile()) overlay.classList.add("visible");
             document.getElementById("panel-title").innerText = id;
             const pdfBtn = document.getElementById("btn-raw-pdf"); pdfBtn.style.display = "none";
-            document.getElementById("panel-body").innerHTML = '<div class="panel-loading"></div>';
+            const body = document.getElementById("panel-body");
+            body.innerHTML = '<div class="panel-loading"></div>';
+
             try {
-                const response = await fetch(`/api/content?id=` + encodeURIComponent(id));
-                const data = await response.json();
-                document.getElementById("panel-body").innerHTML = marked.parse(data.content || "# No Data");
-                if (data.pdf_link) { pdfBtn.href = data.pdf_link; pdfBtn.style.display = "inline-flex"; }
-                document.querySelectorAll('pre code').forEach(c => hljs.highlightElement(c));
-                if (window.MathJax) MathJax.typesetPromise();
+                const response = await fetch(`/api/content/stream?id=` + encodeURIComponent(id));
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let mdAccumulated = '';
+                let firstChunk = true;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Process complete NDJSON lines
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // keep incomplete line in buffer
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        try {
+                            const msg = JSON.parse(line);
+                            if (msg.type === 'meta') {
+                                if (msg.pdf_link) {
+                                    pdfBtn.href = msg.pdf_link;
+                                    pdfBtn.style.display = 'inline-flex';
+                                }
+                            } else if (msg.type === 'chunk') {
+                                mdAccumulated += msg.content;
+                                body.innerHTML = marked.parse(mdAccumulated);
+                                // Highlight new code blocks
+                                body.querySelectorAll('pre code:not(.hljs)').forEach(c => hljs.highlightElement(c));
+                                if (firstChunk) {
+                                    firstChunk = false;
+                                    body.scrollTop = 0;
+                                }
+                            } else if (msg.type === 'done') {
+                                // Final render + MathJax
+                                body.innerHTML = marked.parse(mdAccumulated);
+                                body.querySelectorAll('pre code').forEach(c => hljs.highlightElement(c));
+                                if (window.MathJax) MathJax.typesetPromise();
+                            } else if (msg.type === 'error') {
+                                body.innerHTML = `<p style="color:var(--text-secondary)">Error: ${msg.error}</p>`;
+                            }
+                        } catch (e) { /* skip malformed line */ }
+                    }
+                }
             } catch (err) {
-                document.getElementById("panel-body").innerHTML = '<p style="color:var(--text-secondary)">Failed to load content.</p>';
+                body.innerHTML = '<p style="color:var(--text-secondary)">Failed to load content.</p>';
             }
         }
 

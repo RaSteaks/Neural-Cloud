@@ -5,11 +5,14 @@
 ## 功能特性
 
 - **知识图谱可视化** — D3.js 力导向图，节点大小随文件体积动态缩放
-- **Markdown 预览** — 点击节点即时预览内容，支持代码高亮（highlight.js）和数学公式（MathJax）
-- **搜索与筛选** — 关键词搜索定位节点，按分组过滤显示
-- **节点自定义** — 可为节点自定义颜色标记
+- **Markdown 流式预览** — 点击节点即时预览，大文件分块传输、边加载边渲染，支持代码高亮（highlight.js）和数学公式（MathJax）
+- **智能搜索** — 实时搜索下拉列表，不区分大小写，按匹配度排序，支持键盘导航，点击结果自动定位并高亮节点
+- **动态分组筛选** — 根据扫描路径自动生成 Filter 分组，按文件夹名称显示
+- **节点交互** — 点击高亮脉冲动画，可为节点自定义颜色标记
+- **Scan Path 管理面板** — 右下角齿轮按钮打开设置弹窗，在线增删扫描路径，保存后自动刷新图谱
+- **配置热重载** — 修改 `config.json` 后无需重启，下次请求自动生效
 - **文件代理** — 内置图片和 PDF 代理，浏览器内直接查看
-- **响应式设计** — 桌面端侧边面板 + 移动端底部抽屉，适配多种设备
+- **响应式设计** — 桌面端侧边面板 + 移动端底部抽屉，适配 safe-area
 
 ## 项目结构
 
@@ -17,11 +20,13 @@
 Neural-Cloud/
 ├── app.py                  # Flask 主应用，API 路由
 ├── main.py                 # 入口文件
-├── config.json             # 扫描路径配置（需自行创建）
+├── config.json             # 扫描路径配置（启动时自动创建）
 ├── backend/
-│   └── memo_utils.py       # 文件扫描、图数据构建、内容脱敏
+│   └── memo_utils.py       # 文件扫描、图数据构建、配置热重载
 ├── frontend/
-│   └── index.html          # 单页前端（D3.js + marked.js）
+│   ├── index.html          # 单页前端（D3.js + marked.js）
+│   ├── favicon.ico         # 网站图标
+│   └── apple-touch-icon.png
 ├── pyproject.toml          # 项目依赖
 └── .gitignore
 ```
@@ -45,9 +50,11 @@ uv run app.py
 
 服务启动后访问 `http://localhost:19001`
 
+> 首次启动时，若不存在 `config.json` 会自动创建默认配置文件。
+
 ### 配置
 
-在项目根目录创建 `config.json`：
+在项目根目录的 `config.json`（或通过网页右下角齿轮按钮在线编辑）：
 
 ```json
 {
@@ -73,8 +80,11 @@ uv run app.py
 | `/` | GET | 前端页面 |
 | `/api/graph` | GET | 获取图谱节点和连接数据 |
 | `/api/content?id=` | GET | 获取节点对应的 Markdown 内容 |
+| `/api/content/stream?id=` | GET | 流式分块获取内容（NDJSON） |
 | `/api/image?path=` | GET | 本地图片代理 |
 | `/api/pdf?path=` | GET | 本地 PDF 代理 |
+| `/api/config` | GET | 读取配置 |
+| `/api/config` | POST | 保存配置 |
 
 ## 技术栈
 
