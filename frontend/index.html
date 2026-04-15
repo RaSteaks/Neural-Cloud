@@ -278,6 +278,56 @@
         #settings-btn:hover { color: var(--accent); border-color: var(--accent); transform: rotate(45deg); }
         #settings-btn:active { transform: scale(0.92); }
 
+        .node.search-highlight {
+            animation: pulse-highlight 1.5s ease-out;
+        }
+        @keyframes pulse-highlight {
+            0% { filter: drop-shadow(0 0 0px var(--accent)); }
+            30% { filter: drop-shadow(0 0 18px var(--accent)); }
+            100% { filter: drop-shadow(0 0 4px var(--accent)); }
+        }
+
+        /* === Search Dropdown === */
+        .search-wrapper { position: relative; }
+        #search-dropdown {
+            display: none; position: absolute;
+            top: calc(100% + 4px); left: 0; right: 0;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            backdrop-filter: blur(16px);
+            max-height: 320px; overflow-y: auto;
+            z-index: 150;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+            -webkit-overflow-scrolling: touch;
+        }
+        #search-dropdown.open { display: block; }
+        .search-item {
+            padding: 10px 16px;
+            font-size: 13px; color: var(--text-secondary);
+            cursor: pointer;
+            display: flex; align-items: center; gap: 8px;
+            border-bottom: 1px solid var(--border);
+            transition: background var(--transition-fast), color var(--transition-fast);
+        }
+        .search-item:last-child { border-bottom: none; }
+        .search-item:hover, .search-item.active {
+            background: rgba(255,255,255,0.06);
+            color: var(--text-primary);
+        }
+        .search-item .match-highlight {
+            color: var(--accent); font-weight: 600;
+        }
+        .search-item .search-group {
+            font-size: 11px; color: var(--text-secondary);
+            opacity: 0.6; margin-left: auto; white-space: nowrap;
+        }
+        .search-no-result {
+            padding: 14px 16px;
+            font-size: 13px; color: var(--text-secondary);
+            text-align: center;
+        }
+
         /* === Settings Modal === */
         #settings-overlay {
             display: none; position: fixed;
@@ -411,7 +461,10 @@
 </head>
 <body>
     <div id="controls-container">
-        <input type="text" id="search-input" placeholder="Search Neural Synapses..." autocomplete="off">
+        <div class="search-wrapper">
+            <input type="text" id="search-input" placeholder="Search Neural Synapses..." autocomplete="off">
+            <div id="search-dropdown"></div>
+        </div>
         <div class="glass-box">
             <div class="config-title">Filters</div>
             <div id="filter-list"></div>
@@ -553,6 +606,13 @@
             selectedId = d.id;
             d3.selectAll(".node-group").classed("selected", false);
             d3.select(el).classed("selected", true);
+
+            // Pulse highlight animation on click
+            const circle = d3.select(el).select('circle');
+            circle.classed('search-highlight', false);
+            void circle.node().offsetWidth;
+            circle.classed('search-highlight', true);
+            setTimeout(() => circle.classed('search-highlight', false), 1500);
             
             const config = document.getElementById("node-config");
             config.style.display = "block";
@@ -585,10 +645,19 @@
 
             ["filter-core","filter-logs","filter-assets"].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener("change", updateFilter); });
             document.getElementById("search-input").oninput = (e) => {
-                const term = e.target.value.toLowerCase();
-                const target = allNodesData.find(n => n.id.toLowerCase().includes(term));
-                if (target) { const k = 2.0; const x = width/2 - target.x*k; const y = height/2 - target.y*k; svg.transition().duration(800).call(d3.zoom().transform, d3.zoomIdentity.translate(x,y).scale(k)); }
+                const term = e.target.value.trim().toLowerCase();
+                updateSearchDropdown(term);
             };
+            document.getElementById("search-input").addEventListener('focus', () => {
+                const term = document.getElementById("search-input").value.trim().toLowerCase();
+                if (term) updateSearchDropdown(term);
+            });
+            // Close dropdown on outside click
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.search-wrapper')) {
+                    document.getElementById('search-dropdown').classList.remove('open');
+                }
+            });
         }
 
         const isMobile = () => window.innerWidth <= 768;
@@ -757,6 +826,108 @@
         // Enter key to add path
         document.getElementById('new-path-input').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') addPath();
+        });
+
+        // === Search Dropdown Logic ===
+        let _searchActiveIdx = -1;
+
+        function updateSearchDropdown(term) {
+            const dropdown = document.getElementById('search-dropdown');
+            _searchActiveIdx = -1;
+            if (!term) {
+                dropdown.classList.remove('open');
+                return;
+            }
+            // Score and sort: startsWith > includes, shorter id = better
+            const scored = allNodesData
+                .filter(n => n.id.toLowerCase().includes(term))
+                .map(n => {
+                    const lower = n.id.toLowerCase();
+                    const idx = lower.indexOf(term);
+                    const startBonus = idx === 0 ? 1000 : 0;
+                    const lengthPenalty = n.id.length;
+                    return { node: n, score: startBonus - lengthPenalty + (100 - idx) };
+                })
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 15);
+
+            if (scored.length === 0) {
+                dropdown.innerHTML = '<div class="search-no-result">No results</div>';
+                dropdown.classList.add('open');
+                return;
+            }
+
+            dropdown.innerHTML = scored.map((s, i) => {
+                const name = s.node.id;
+                const lower = name.toLowerCase();
+                const idx = lower.indexOf(term);
+                const before = name.substring(0, idx);
+                const match = name.substring(idx, idx + term.length);
+                const after = name.substring(idx + term.length);
+                const groupName = groupLabels[s.node.group] || '';
+                return `<div class="search-item" data-id="${name}" data-index="${i}">`
+                    + `<span>${before}<span class="match-highlight">${match}</span>${after}</span>`
+                    + (groupName ? `<span class="search-group">${groupName}</span>` : '')
+                    + `</div>`;
+            }).join('');
+
+            dropdown.querySelectorAll('.search-item').forEach(el => {
+                el.addEventListener('click', () => selectSearchResult(el.dataset.id));
+            });
+            dropdown.classList.add('open');
+        }
+
+        function selectSearchResult(id) {
+            document.getElementById('search-dropdown').classList.remove('open');
+            document.getElementById('search-input').value = id;
+            const target = allNodesData.find(n => n.id === id);
+            if (target) {
+                // Zoom to node
+                const k = 2.5;
+                const x = width / 2 - target.x * k;
+                const y = height / 2 - target.y * k;
+                svg.transition().duration(800).call(
+                    d3.zoom().transform,
+                    d3.zoomIdentity.translate(x, y).scale(k)
+                );
+                // Select node via selectNode (reuse full logic)
+                const nodeEl = d3.selectAll('.node-group').filter(d => d.id === target.id);
+                if (!nodeEl.empty()) {
+                    selectNode(target, nodeEl.node());
+                    // Add highlight pulse animation
+                    nodeEl.select('circle').classed('search-highlight', false);
+                    // Force reflow to restart animation
+                    void nodeEl.select('circle').node().offsetWidth;
+                    nodeEl.select('circle').classed('search-highlight', true);
+                    setTimeout(() => nodeEl.select('circle').classed('search-highlight', false), 1500);
+                }
+            }
+        }
+
+        // Keyboard navigation in dropdown
+        document.getElementById('search-input').addEventListener('keydown', (e) => {
+            const dropdown = document.getElementById('search-dropdown');
+            const items = dropdown.querySelectorAll('.search-item');
+            if (!items.length || !dropdown.classList.contains('open')) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                _searchActiveIdx = Math.min(_searchActiveIdx + 1, items.length - 1);
+                items.forEach((el, i) => el.classList.toggle('active', i === _searchActiveIdx));
+                items[_searchActiveIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                _searchActiveIdx = Math.max(_searchActiveIdx - 1, 0);
+                items.forEach((el, i) => el.classList.toggle('active', i === _searchActiveIdx));
+                items[_searchActiveIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (_searchActiveIdx >= 0 && items[_searchActiveIdx]) {
+                    selectSearchResult(items[_searchActiveIdx].dataset.id);
+                }
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('open');
+            }
         });
     </script>
 </body>
