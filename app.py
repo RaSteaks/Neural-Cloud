@@ -16,6 +16,10 @@ def index():
     """Neural Cloud Main Entrance"""
     return send_from_directory(FRONTEND_DIR, "index.html")
 
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(FRONTEND_DIR, "favicon.ico", mimetype="image/x-icon")
+
 @app.route("/api/graph")
 def api_graph():
     """Neural Synapses Topology"""
