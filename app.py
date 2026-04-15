@@ -88,5 +88,22 @@ def api_pdf():
     return "404", 404
 
 if __name__ == "__main__":
+    # Check config.json on startup, create default if missing
+    config_path = os.path.join(ROOT_DIR, "config.json")
+    if not os.path.exists(config_path):
+        default_config = {
+            "scan_paths": [
+                os.path.join(os.path.expanduser("~"), ".openclaw", "workspace", "memory")
+            ],
+            "core_memory_file": os.path.join(os.path.expanduser("~"), ".openclaw", "workspace", "MEMORY.md")
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(default_config, f, indent=4, ensure_ascii=False)
+        print(f"\033[33m[INFO] config.json created with defaults: {config_path}\033[0m")
+        print("  Please edit it to set your own scan paths.")
+        print()
+    else:
+        print(f"\033[32m[OK] Config loaded: {config_path}\033[0m")
+
     # Standard Port for Neural Cloud
     app.run(host="0.0.0.0", port=19001)
