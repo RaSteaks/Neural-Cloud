@@ -44,10 +44,9 @@ def get_all_md_files() -> List[str]:
     for path in get_scan_paths():
         path = path.strip()
         if not path or not os.path.exists(path): continue
-        for root, dirs, files in os.walk(path):
-            for file in files:
-                if file.endswith(".md"):
-                    md_files.append(os.path.abspath(os.path.join(root, file)))
+        for file in os.listdir(path):
+            if file.endswith(".md"):
+                md_files.append(os.path.abspath(os.path.join(path, file)))
     return md_files
 
 def get_yesterday_date_str() -> str:
@@ -107,20 +106,53 @@ def build_memory_graph() -> Dict[str, Any]:
             file_size = 0
         nodes.append({"id": name, "group": group, "size": file_size})
 
-    link_pattern = re.compile(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]')
+    # Link patterns: [[wiki-link]], [text](file.md), [text](./file.md)
+    wiki_pattern = re.compile(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]')
+    md_link_pattern = re.compile(r'\[([^\]]+)\]\(([^)]+\.md)\)')
+    # Build a case-insensitive lookup map for fuzzy matching
+    name_lookup = {n.lower().strip(): n for n in file_map}
+    seen_links = set()
+
+    def _resolve(target_name):
+        """Resolve a target name to a known node id."""
+        t = target_name.strip().replace(".md", "")
+        # Remove leading ./ or path prefix, keep only filename
+        t = os.path.basename(t)
+        return file_map.get(t) and t or name_lookup.get(t.lower().strip())
+
     for name, path in file_map.items():
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-                matches = link_pattern.findall(content)
-                for target in matches:
-                    target = target.strip().replace(".md", "")
-                    if target in file_map:
-                        links.append({"source": name, "target": target, "value": 1})
+            content = _read_text(path)
+
+            # 1. Wiki-style [[links]]
+            for target in wiki_pattern.findall(content):
+                resolved = _resolve(target)
+                if resolved and resolved != name:
+                    key = (name, resolved)
+                    if key not in seen_links:
+                        seen_links.add(key)
+                        links.append({"source": name, "target": resolved, "value": 1})
+
+            # 2. Standard markdown [text](file.md) links
+            for text, href in md_link_pattern.findall(content):
+                resolved = _resolve(href)
+                if resolved and resolved != name:
+                    key = (name, resolved)
+                    if key not in seen_links:
+                        seen_links.add(key)
+                        links.append({"source": name, "target": resolved, "value": 1})
+
         except Exception: continue
-            
-    if not links and "MEMORY" in file_map:
+
+    # Fallback: if no links detected, connect core memory node to all others
+    if not links:
+        core_name = None
         for node in nodes:
-            if node["id"] != "MEMORY":
-                links.append({"source": "MEMORY", "target": node["id"], "value": 0.5})
+            if node["group"] == 0:
+                core_name = node["id"]
+                break
+        if core_name:
+            for node in nodes:
+                if node["id"] != core_name:
+                    links.append({"source": core_name, "target": node["id"], "value": 0.5})
     return {"nodes": nodes, "links": links, "groups": group_labels}
