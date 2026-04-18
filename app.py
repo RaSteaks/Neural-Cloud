@@ -16,6 +16,10 @@ def index():
     """Neural Cloud Main Entrance"""
     return send_from_directory(FRONTEND_DIR, "index.html")
 
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(FRONTEND_DIR, "favicon.ico", mimetype="image/x-icon")
+
 @app.route("/api/graph")
 def api_graph():
     """Neural Synapses Topology"""
@@ -65,6 +69,56 @@ def api_content():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/content/stream")
+def api_content_stream():
+    """Streaming content for large files"""
+    node_id = request.args.get("id")
+    if not node_id: return jsonify({"error": "No ID"}), 400
+
+    decoded_id = urllib.parse.unquote(node_id).strip()
+    from backend.memo_utils import get_all_md_files
+    files = get_all_md_files()
+
+    target = next((p for p in files if os.path.basename(p).replace(".md", "").strip() in [decoded_id, decoded_id.replace(" ",""), node_id]), None)
+    if not target: return jsonify({"error": f"NodeNotFound: {decoded_id}"}), 404
+
+    CHUNK_LINES = 40
+
+    def img_replacer(match):
+        try:
+            alt, img_p = match.group(1), match.group(2)
+            img_p_u = urllib.parse.unquote(img_p)
+            full_p = img_p_u if ":" in img_p_u or img_p_u.startswith(("/", "\\")) else os.path.abspath(os.path.join(os.path.dirname(target), img_p_u))
+            return f'![{alt}](/api/image?path={urllib.parse.quote(full_p)})'
+        except: return match.group(0)
+
+    def generate():
+        try:
+            # Send metadata first
+            pdf_link = None
+            bn = os.path.basename(target).replace(".md", "")
+            for p_pdf in [os.path.join(os.path.dirname(target), bn+".pdf"), os.path.join(os.path.dirname(os.path.dirname(target)), bn+".pdf")]:
+                if os.path.exists(p_pdf):
+                    pdf_link = f"/api/pdf?path={urllib.parse.quote(p_pdf)}"
+                    break
+            yield json.dumps({"type": "meta", "id": decoded_id, "pdf_link": pdf_link}) + "\n"
+
+            with open(target, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            # Stream in chunks
+            for i in range(0, len(lines), CHUNK_LINES):
+                chunk = "".join(lines[i:i+CHUNK_LINES])
+                chunk = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', img_replacer, chunk)
+                yield json.dumps({"type": "chunk", "content": chunk}) + "\n"
+
+            yield json.dumps({"type": "done"}) + "\n"
+        except Exception as e:
+            yield json.dumps({"type": "error", "error": str(e)}) + "\n"
+
+    return Response(generate(), mimetype="application/x-ndjson",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
 @app.route("/api/image")
 def api_image():
     """Media Proxy Hub"""
@@ -87,6 +141,54 @@ def api_pdf():
         return send_from_directory(os.path.dirname(p), os.path.basename(p))
     return "404", 404
 
+@app.route("/api/config", methods=["GET"])
+def get_config():
+    """Read config.json"""
+    config_path = os.path.join(ROOT_DIR, "config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return jsonify(json.load(f))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/config", methods=["POST"])
+def save_config():
+    """Write config.json"""
+    config_path = os.path.join(ROOT_DIR, "config.json")
+    try:
+        data = request.get_json()
+        if not data or "scan_paths" not in data:
+            return jsonify({"error": "Invalid config: scan_paths required"}), 400
+        # Validate: scan_paths must be a list of strings
+        if not isinstance(data["scan_paths"], list):
+            return jsonify({"error": "scan_paths must be a list"}), 400
+        config = {
+            "scan_paths": [str(p).strip() for p in data["scan_paths"] if str(p).strip()],
+            "core_memory_file": str(data.get("core_memory_file", "")).strip()
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
+    # Check config.json on startup, create default if missing
+    config_path = os.path.join(ROOT_DIR, "config.json")
+    if not os.path.exists(config_path):
+        default_config = {
+            "scan_paths": [
+                os.path.join(os.path.expanduser("~"), ".openclaw", "workspace", "memory")
+            ],
+            "core_memory_file": os.path.join(os.path.expanduser("~"), ".openclaw", "workspace", "MEMORY.md")
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(default_config, f, indent=4, ensure_ascii=False)
+        print(f"\033[33m[INFO] config.json created with defaults: {config_path}\033[0m")
+        print("  Please edit it to set your own scan paths.")
+        print()
+    else:
+        print(f"\033[32m[OK] Config loaded: {config_path}\033[0m")
+
     # Standard Port for Neural Cloud
     app.run(host="0.0.0.0", port=19001)

@@ -1,95 +1,536 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="utf-8">
-    <title>OpenClaw Neural Cloud</title>
-    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0b0e14">
+    <title>Neural Cloud</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
-        :root { --accent: #00ffcc; --gold: #ffcc00; --bg: #0b0e14; --panel: rgba(18,22,30,0.96); --border: rgba(255,255,255,0.08); }
-        body { margin: 0; background: var(--bg); color: #eee; font-family: "PingFang SC", sans-serif; overflow: hidden; }
-        #graph { width: 100vw; height: 100vh; }
-        
+        :root {
+            --accent: #00ffcc;
+            --gold: #ffcc00;
+            --bg: #0b0e14;
+            --panel: rgba(18,22,30,0.96);
+            --border: rgba(255,255,255,0.08);
+            --border-hover: rgba(255,255,255,0.18);
+            --text-primary: #f0f0f0;
+            --text-secondary: #aab;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --transition-fast: 0.15s ease;
+            --transition-normal: 0.25s ease;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text-primary);
+            font-family: "PingFang SC", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        #graph { width: 100vw; height: 100dvh; touch-action: none; }
+
+        /* === Graph Elements === */
         .link { stroke: #333; stroke-opacity: 0.4; stroke-width: 1.2px; pointer-events: none; }
-        .node { stroke: #fff; stroke-width: 1px; cursor: pointer; transition: all 0.3s; }
-        .node.selected { stroke: var(--gold); stroke-width: 3px; r: 14; filter: drop-shadow(0 0 10px var(--gold)); }
+        .node { stroke: #fff; stroke-width: 1px; cursor: pointer; transition: all 0.25s ease; }
+        .node.selected { stroke: var(--gold); stroke-width: 3px; filter: drop-shadow(0 0 10px var(--gold)); }
         .node.highlighted { stroke: var(--accent); stroke-width: 2px; filter: drop-shadow(0 0 8px var(--accent)); }
 
-        .label-bg { fill: rgba(0,0,0,0.8); backdrop-filter: blur(4px); rx: 8; ry: 8; opacity: 0; pointer-events: none; stroke: var(--border); stroke-width: 0.5px; transition: opacity 0.3s; }
-        .label-text { font-size: 11px; pointer-events: none; fill: #fff; opacity: 0; transition: opacity 0.3s; }
-        
-        .node-group.focused .label-bg, .node-group.focused .label-text { opacity: 1 !important; }
+        .label-bg {
+            fill: rgba(0,0,0,0.75); rx: 8; ry: 8;
+            opacity: 0; pointer-events: none;
+            stroke: var(--border); stroke-width: 0.5px;
+            transition: opacity 0.25s ease;
+        }
+        .label-text {
+            font-size: 12px; pointer-events: none;
+            fill: #fff; opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+        .node-group.focused .label-bg, .node-group.focused .label-text,
         .node-group.selected .label-bg, .node-group.selected .label-text { opacity: 1 !important; }
 
-        #preview-panel { 
-            position: absolute; top: 20px; right: -850px; width: 500px; height: calc(100vh - 40px); 
-            background: var(--panel); border: 1px solid var(--border);
-            transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s ease;
-            display: flex; flex-direction: column; overflow: hidden;
-            box-shadow: -15px 0 40px rgba(0,0,0,0.5); border-radius: 16px; backdrop-filter: blur(25px); z-index: 1000;
+        /* === Controls === */
+        #controls-container {
+            position: absolute; top: 20px; left: 20px;
+            display: flex; flex-direction: column; gap: 12px;
+            z-index: 100; max-width: calc(100vw - 40px);
         }
-        #preview-panel.open { right: 20px; }
-        #resizer { position: absolute; left: 0; top: 0; width: 6px; height: 100%; cursor: ew-resize; background: transparent; }
-        
-        .panel-header { padding: 20px 25px; border-bottom: 1px solid var(--border); }
-        .actions-bar { display: flex; gap: 10px; margin-top: 15px; }
-        .btn { padding: 6px 12px; font-size: 11px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); transition: all 0.2s; background: rgba(255,255,255,0.05); color: #ccc; text-decoration: none; }
-        .btn:hover { background: var(--accent); color: #000; }
 
-        .panel-content { padding: 30px; overflow-y: auto; flex: 1; font-size: 14px; line-height: 1.7; color: #ddd; }
-        
-        #controls-container { position: absolute; top: 25px; left: 25px; display: flex; flex-direction: column; gap: 15px; z-index: 100; }
-        #search-input { width: 280px; padding: 12px 20px; border-radius: 25px; background: var(--panel); border: 1px solid var(--border); color: #fff; outline: none; }
-        
-        .glass-box { background: var(--panel); border: 1px solid var(--border); padding: 15px; border-radius: 12px; backdrop-filter: blur(10px); }
-        .config-title { font-size: 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; font-weight: bold; }
-        
-        .color-picker { display: flex; gap: 8px; }
-        .color-circle { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform 0.2s; }
-        .color-circle:hover { transform: scale(1.2); }
-        .color-circle.active { border-color: #fff; transform: scale(1.3); box-shadow: 0 0 8px rgba(255,255,255,0.5); }
+        #search-input {
+            width: 300px; max-width: 100%;
+            padding: 12px 20px;
+            border-radius: 25px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: #fff; font-size: 14px;
+            outline: none;
+            transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+            backdrop-filter: blur(12px);
+        }
+        #search-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0, 255, 204, 0.12);
+        }
+        #search-input::placeholder { color: var(--text-secondary); }
+
+        .glass-box {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            padding: 16px;
+            border-radius: var(--radius-md);
+            backdrop-filter: blur(12px);
+        }
+
+        .config-title {
+            font-size: 11px; color: var(--accent);
+            text-transform: uppercase; letter-spacing: 1.2px;
+            margin-bottom: 12px; font-weight: 600;
+        }
+
+        .filter-label {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 13px; color: var(--text-secondary);
+            padding: 6px 0; cursor: pointer;
+            transition: color var(--transition-fast);
+        }
+        .filter-label:hover { color: var(--text-primary); }
+        .filter-label input[type="checkbox"] {
+            width: 16px; height: 16px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        /* === Color Picker === */
+        .color-picker { display: flex; gap: 10px; }
+        .color-circle {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+        }
+        .color-circle:hover { transform: scale(1.15); }
+        .color-circle.active {
+            border-color: #fff; transform: scale(1.2);
+            box-shadow: 0 0 12px rgba(255,255,255,0.4);
+        }
+
+        /* === Preview Panel (Desktop) === */
+        #preview-panel {
+            position: absolute; top: 16px; right: -900px;
+            width: 480px; height: calc(100dvh - 32px);
+            background: var(--panel); border: 1px solid var(--border);
+            transition: right 0.35s cubic-bezier(0.16, 1, 0.3, 1), width 0.25s ease;
+            display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: -12px 0 40px rgba(0,0,0,0.5);
+            border-radius: var(--radius-lg);
+            backdrop-filter: blur(25px);
+            z-index: 1000;
+        }
+        #preview-panel.open { right: 16px; }
+
+        #resizer {
+            position: absolute; left: -2px; top: 0;
+            width: 8px; height: 100%;
+            cursor: ew-resize; background: transparent;
+        }
+
+        .panel-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        .panel-header-top {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        }
+        .panel-header-top h2 {
+            margin: 0; font-size: 16px; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            flex: 1; min-width: 0;
+        }
+
+        .actions-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+
+        .btn {
+            padding: 8px 16px; font-size: 12px; font-weight: 500;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            border: 1px solid var(--border);
+            transition: all var(--transition-fast);
+            background: rgba(255,255,255,0.05);
+            color: var(--text-secondary);
+            text-decoration: none;
+            white-space: nowrap;
+            line-height: 1.4;
+        }
+        .btn:hover {
+            background: var(--accent); color: #000;
+            border-color: var(--accent);
+        }
+        .btn:active { transform: scale(0.96); }
+        .btn-close {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(255,255,255,0.12);
+            color: var(--text-primary);
+        }
+
+        .panel-content {
+            padding: 24px; overflow-y: auto; flex: 1;
+            font-size: 15px; line-height: 1.75; color: #ddd;
+            -webkit-overflow-scrolling: touch;
+        }
+        .panel-content img { max-width: 100%; height: auto; border-radius: var(--radius-sm); }
+        .panel-content pre { overflow-x: auto; border-radius: var(--radius-sm); }
+        .panel-content code { font-size: 13px; }
+
+        /* === Mobile Overlay === */
+        #panel-overlay {
+            display: none; position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+            opacity: 0; transition: opacity 0.25s ease;
+        }
+        #panel-overlay.visible { display: block; opacity: 1; }
+
+        /* === Mobile Responsive === */
+        @media (max-width: 768px) {
+            #controls-container {
+                top: 12px; left: 12px; right: 12px;
+                max-width: none;
+            }
+            #search-input { width: 100%; font-size: 16px; }
+
+            .glass-box { padding: 12px; }
+            .filter-label { font-size: 14px; padding: 8px 0; }
+
+            #preview-panel {
+                top: auto; bottom: 0; right: 0; left: 0;
+                width: 100% !important;
+                height: 70dvh;
+                border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+                transform: translateY(100%);
+                transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            #preview-panel.open {
+                right: 0;
+                transform: translateY(0);
+            }
+
+            #resizer { display: none; }
+
+            .panel-header { padding: 16px; }
+            .panel-header::before {
+                content: '';
+                display: block; width: 36px; height: 4px;
+                background: rgba(255,255,255,0.2);
+                border-radius: 2px;
+                margin: 0 auto 12px;
+            }
+            .panel-content { padding: 16px; font-size: 15px; }
+
+            .btn { padding: 10px 18px; font-size: 13px; }
+        }
+
+        /* === Loading State === */
+        .panel-loading {
+            display: flex; align-items: center; justify-content: center;
+            height: 120px; color: var(--text-secondary);
+        }
+        .panel-loading::after {
+            content: ''; width: 24px; height: 24px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* === Settings Button === */
+        #settings-btn {
+            position: fixed; bottom: 24px; right: 24px;
+            width: 48px; height: 48px;
+            border-radius: 50%;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 22px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            transition: all var(--transition-fast);
+            z-index: 200;
+        }
+        #settings-btn:hover { color: var(--accent); border-color: var(--accent); transform: rotate(45deg); }
+        #settings-btn:active { transform: scale(0.92); }
+
+        .node.search-highlight {
+            animation: pulse-highlight 1.5s ease-out;
+        }
+        @keyframes pulse-highlight {
+            0% { filter: drop-shadow(0 0 0px var(--accent)); }
+            30% { filter: drop-shadow(0 0 18px var(--accent)); }
+            100% { filter: drop-shadow(0 0 4px var(--accent)); }
+        }
+
+        /* === Search Dropdown === */
+        .search-wrapper { position: relative; }
+        #search-dropdown {
+            display: none; position: absolute;
+            top: calc(100% + 4px); left: 0; right: 0;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            backdrop-filter: blur(16px);
+            max-height: 320px; overflow-y: auto;
+            z-index: 150;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+            -webkit-overflow-scrolling: touch;
+        }
+        #search-dropdown.open { display: block; }
+        .search-item {
+            padding: 10px 16px;
+            font-size: 13px; color: var(--text-secondary);
+            cursor: pointer;
+            display: flex; align-items: center; gap: 8px;
+            border-bottom: 1px solid var(--border);
+            transition: background var(--transition-fast), color var(--transition-fast);
+        }
+        .search-item:last-child { border-bottom: none; }
+        .search-item:hover, .search-item.active {
+            background: rgba(255,255,255,0.06);
+            color: var(--text-primary);
+        }
+        .search-item .match-highlight {
+            color: var(--accent); font-weight: 600;
+        }
+        .search-item .search-group {
+            font-size: 11px; color: var(--text-secondary);
+            opacity: 0.6; margin-left: auto; white-space: nowrap;
+        }
+        .search-no-result {
+            padding: 14px 16px;
+            font-size: 13px; color: var(--text-secondary);
+            text-align: center;
+        }
+
+        /* === Settings Modal === */
+        #settings-overlay {
+            display: none; position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.55);
+            z-index: 2000;
+            align-items: center; justify-content: center;
+        }
+        #settings-overlay.open { display: flex; }
+
+        #settings-modal {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            width: 480px; max-width: calc(100vw - 32px);
+            max-height: calc(100dvh - 64px);
+            display: flex; flex-direction: column;
+            backdrop-filter: blur(25px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+            overflow: hidden;
+        }
+
+        .settings-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .settings-header h3 { margin: 0; font-size: 16px; font-weight: 600; }
+
+        .settings-body {
+            padding: 20px 24px;
+            overflow-y: auto; flex: 1;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .settings-section { margin-bottom: 20px; }
+        .settings-section-title {
+            font-size: 11px; color: var(--accent);
+            text-transform: uppercase; letter-spacing: 1.2px;
+            font-weight: 600; margin-bottom: 10px;
+        }
+
+        .path-list { list-style: none; margin: 0; padding: 0; }
+        .path-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; margin-bottom: 6px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 13px; color: var(--text-primary);
+            word-break: break-all;
+        }
+        .path-item span { flex: 1; min-width: 0; }
+        .path-item button {
+            background: none; border: none;
+            color: #e74c3c; cursor: pointer;
+            font-size: 16px; padding: 4px 8px;
+            border-radius: 4px;
+            transition: background var(--transition-fast);
+            flex-shrink: 0;
+        }
+        .path-item button:hover { background: rgba(231,76,60,0.15); }
+
+        .path-add-row {
+            display: flex; gap: 8px; margin-top: 8px;
+        }
+        .path-add-row input {
+            flex: 1; padding: 10px 14px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: #fff; font-size: 13px;
+            outline: none;
+        }
+        .path-add-row input:focus { border-color: var(--accent); }
+        .path-add-row button {
+            padding: 10px 16px;
+            background: rgba(0,255,204,0.1);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            border-radius: var(--radius-sm);
+            cursor: pointer; font-size: 13px; font-weight: 500;
+            white-space: nowrap;
+            transition: all var(--transition-fast);
+        }
+        .path-add-row button:hover { background: var(--accent); color: #000; }
+
+        .settings-input {
+            width: 100%; padding: 10px 14px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: #fff; font-size: 13px;
+            outline: none;
+        }
+        .settings-input:focus { border-color: var(--accent); }
+
+        .settings-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border);
+            display: flex; gap: 8px; justify-content: flex-end;
+        }
+
+        .settings-toast {
+            position: fixed; bottom: 80px; right: 24px;
+            padding: 10px 20px;
+            background: var(--accent); color: #000;
+            border-radius: var(--radius-sm);
+            font-size: 13px; font-weight: 500;
+            opacity: 0; transition: opacity 0.25s ease;
+            z-index: 3000;
+        }
+        .settings-toast.show { opacity: 1; }
+
+        @media (max-width: 768px) {
+            #settings-btn {
+                bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+                right: 16px;
+            }
+            #settings-modal {
+                width: 100%; max-width: 100%;
+                height: 100dvh; max-height: 100dvh;
+                border-radius: 0;
+            }
+            .settings-toast {
+                bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+                right: 16px; left: 16px;
+                text-align: center;
+            }
+        }
     </style>
 </head>
 <body>
     <div id="controls-container">
-        <input type="text" id="search-input" placeholder="Search Neural Synapses..." autocomplete="off">
+        <div class="search-wrapper">
+            <input type="text" id="search-input" placeholder="Search Neural Synapses..." autocomplete="off">
+            <div id="search-dropdown"></div>
+        </div>
         <div class="glass-box">
             <div class="config-title">Filters</div>
-            <label style="font-size:11px; display:block; margin-bottom:5px;"><input type="checkbox" id="filter-core" checked> Core (MEMORY)</label>
-            <label style="font-size:11px; display:block; margin-bottom:5px;"><input type="checkbox" id="filter-logs" checked> Logs (C盘)</label>
-            <label style="font-size:11px; display:block;"><input type="checkbox" id="filter-assets" checked> Assets (D盘)</label>
+            <div id="filter-list"></div>
             
-            <div id="node-config" style="display:none; border-top: 1px solid var(--border); margin-top:15px; padding-top:10px;">
-                <div class="config-title">Selected Node Style</div>
+            <div id="node-config" style="display:none; border-top: 1px solid var(--border); margin-top:12px; padding-top:12px;">
+                <div class="config-title">Node Color</div>
                 <div class="color-picker" id="node-color-picker">
-                    <div class="color-circle" data-color="#42b983" style="background:#42b983"></div>
-                    <div class="color-circle" data-color="#3498db" style="background:#3498db"></div>
-                    <div class="color-circle" data-color="#e74c3c" style="background:#e74c3c"></div>
-                    <div class="color-circle" data-color="#9b59b6" style="background:#9b59b6"></div>
-                    <div class="color-circle" data-color="#f1c40f" style="background:#f1c40f"></div>
+                    <div class="color-circle" data-color="#42b983" style="background:#42b983" role="button" aria-label="Green"></div>
+                    <div class="color-circle" data-color="#3498db" style="background:#3498db" role="button" aria-label="Blue"></div>
+                    <div class="color-circle" data-color="#e74c3c" style="background:#e74c3c" role="button" aria-label="Red"></div>
+                    <div class="color-circle" data-color="#9b59b6" style="background:#9b59b6" role="button" aria-label="Purple"></div>
+                    <div class="color-circle" data-color="#f1c40f" style="background:#f1c40f" role="button" aria-label="Yellow"></div>
                 </div>
             </div>
         </div>
     </div>
 
+    <div id="panel-overlay" onclick="closePanel()"></div>
     <div id="preview-panel">
         <div id="resizer"></div>
         <div class="panel-header">
-            <button class="btn" style="float:right" onclick="closePanel()">CLOSE</button>
-            <h2 id="panel-title" style="margin:0; font-size:18px;"></h2>
+            <div class="panel-header-top">
+                <h2 id="panel-title"></h2>
+                <button class="btn btn-close" onclick="closePanel()" aria-label="Close panel">CLOSE</button>
+            </div>
             <div class="actions-bar">
-                <a id="btn-raw-pdf" class="btn" target="_blank" style="display:none; color:var(--gold); border-color:var(--gold);">📄 VIEW PDF</a>
-                <button class="btn" onclick="resetWidth()">RESET WIDTH</button>
+                <a id="btn-raw-pdf" class="btn" target="_blank" style="display:none; color:var(--gold); border-color:var(--gold);">VIEW PDF</a>
+                <button class="btn btn-reset-width" onclick="resetWidth()">RESET WIDTH</button>
             </div>
         </div>
         <div id="panel-body" class="panel-content">Select a node...</div>
     </div>
     
     <svg id="graph"></svg>
+
+    <!-- Settings Button -->
+    <button id="settings-btn" onclick="openSettings()" aria-label="Settings">&#9881;</button>
+
+    <!-- Settings Modal -->
+    <div id="settings-overlay" onclick="if(event.target===this)closeSettings()">
+        <div id="settings-modal">
+            <div class="settings-header">
+                <h3>Settings</h3>
+                <button class="btn btn-close" onclick="closeSettings()">CLOSE</button>
+            </div>
+            <div class="settings-body">
+                <div class="settings-section">
+                    <div class="settings-section-title">Scan Paths</div>
+                    <ul class="path-list" id="path-list"></ul>
+                    <div class="path-add-row">
+                        <input type="text" id="new-path-input" placeholder="Enter path, e.g. ~/notes">
+                        <button onclick="addPath()">Add</button>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-section-title">Core Memory File</div>
+                    <input type="text" class="settings-input" id="core-mem-input" placeholder="e.g. ~/.openclaw/workspace/MEMORY.md">
+                </div>
+            </div>
+            <div class="settings-footer">
+                <button class="btn" onclick="closeSettings()">Cancel</button>
+                <button class="btn" style="background:var(--accent);color:#000;border-color:var(--accent)" onclick="saveSettings()">Save</button>
+            </div>
+        </div>
+    </div>
+    <div class="settings-toast" id="settings-toast"></div>
 
     <script>
         const svg = d3.select("#graph"), width = window.innerWidth, height = window.innerHeight;
@@ -101,10 +542,21 @@
             .force("link", d3.forceLink().id(d => d.id).distance(220))
             .force("charge", d3.forceManyBody().strength(-800))
             .force("center", d3.forceCenter(width / 2, height / 2))
-            .force("collision", d3.forceCollide().radius(80));
+            .force("collision", d3.forceCollide().radius(d => (d.r || 8) + 30));
+
+        let groupLabels = {};
 
         d3.json("/api/graph").then(graph => {
-            allNodesData = graph.nodes.map(n => ({...n, customColor: null}));
+            // Store group labels and build dynamic filters
+            groupLabels = graph.groups || {};
+            buildFilterUI(groupLabels);
+
+            // Compute node radius based on file size using sqrt scale, capped below MEMORY node
+            const MEMORY_RADIUS = 22;
+            const sizes = graph.nodes.map(n => n.size || 0);
+            const maxSize = Math.max(...sizes, 1);
+            const sizeScale = d3.scaleSqrt().domain([0, maxSize]).range([5, MEMORY_RADIUS - 2]).clamp(true);
+            allNodesData = graph.nodes.map(n => ({...n, customColor: null, r: n.id === 'MEMORY' ? MEMORY_RADIUS : sizeScale(n.size || 0)}));
             allLinksData = graph.links;
             updateFilter();
             setupInteractions();
@@ -131,8 +583,8 @@
                 }
                 
                 el.select("circle")
-                    .attr("r", d.id === "MEMORY" ? 18 : 8)
-                    .attr("fill", d.customColor || (d.id === "MEMORY" ? "var(--gold)" : (d.group === 1 ? "#42b983" : "#3498db")))
+                    .attr("r", d.r || 8)
+                    .attr("fill", d.customColor || (d.id === "MEMORY" ? "var(--gold)" : (d.group === 0 ? "var(--gold)" : (d.group % 2 === 1 ? "#42b983" : "#3498db"))))
                     .classed("selected", d.id === selectedId);
 
                 el.select("text").text(d.id.length > 25 ? d.id.substr(0,22)+'...' : d.id);
@@ -154,6 +606,13 @@
             selectedId = d.id;
             d3.selectAll(".node-group").classed("selected", false);
             d3.select(el).classed("selected", true);
+
+            // Pulse highlight animation on click
+            const circle = d3.select(el).select('circle');
+            circle.classed('search-highlight', false);
+            void circle.node().offsetWidth;
+            circle.classed('search-highlight', true);
+            setTimeout(() => circle.classed('search-highlight', false), 1500);
             
             const config = document.getElementById("node-config");
             config.style.display = "block";
@@ -184,38 +643,118 @@
                 };
             });
 
-            ["filter-core","filter-logs","filter-assets"].forEach(id => document.getElementById(id).addEventListener("change", updateFilter));
+            ["filter-core","filter-logs","filter-assets"].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener("change", updateFilter); });
             document.getElementById("search-input").oninput = (e) => {
-                const term = e.target.value.toLowerCase();
-                const target = allNodesData.find(n => n.id.toLowerCase().includes(term));
-                if (target) { const k = 2.0; const x = width/2 - target.x*k; const y = height/2 - target.y*k; svg.transition().duration(800).call(d3.zoom().transform, d3.zoomIdentity.translate(x,y).scale(k)); }
+                const term = e.target.value.trim().toLowerCase();
+                updateSearchDropdown(term);
             };
+            document.getElementById("search-input").addEventListener('focus', () => {
+                const term = document.getElementById("search-input").value.trim().toLowerCase();
+                if (term) updateSearchDropdown(term);
+            });
+            // Close dropdown on outside click
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.search-wrapper')) {
+                    document.getElementById('search-dropdown').classList.remove('open');
+                }
+            });
         }
+
+        const isMobile = () => window.innerWidth <= 768;
+        const overlay = document.getElementById("panel-overlay");
 
         async function openNode(id) {
             panel.classList.add("open");
+            if (isMobile()) overlay.classList.add("visible");
             document.getElementById("panel-title").innerText = id;
             const pdfBtn = document.getElementById("btn-raw-pdf"); pdfBtn.style.display = "none";
+            const body = document.getElementById("panel-body");
+            body.innerHTML = '<div class="panel-loading"></div>';
+
             try {
-                const response = await fetch(`/api/content?id=` + encodeURIComponent(id));
-                const data = await response.json();
-                document.getElementById("panel-body").innerHTML = marked.parse(data.content || "# No Data");
-                if (data.pdf_link) { pdfBtn.href = data.pdf_link; pdfBtn.style.display = "inline-flex"; }
-                document.querySelectorAll('pre code').forEach(c => hljs.highlightElement(c));
-                if (window.MathJax) MathJax.typesetPromise();
-            } catch (err) { }
+                const response = await fetch(`/api/content/stream?id=` + encodeURIComponent(id));
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let mdAccumulated = '';
+                let firstChunk = true;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Process complete NDJSON lines
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // keep incomplete line in buffer
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        try {
+                            const msg = JSON.parse(line);
+                            if (msg.type === 'meta') {
+                                if (msg.pdf_link) {
+                                    pdfBtn.href = msg.pdf_link;
+                                    pdfBtn.style.display = 'inline-flex';
+                                }
+                            } else if (msg.type === 'chunk') {
+                                mdAccumulated += msg.content;
+                                body.innerHTML = marked.parse(mdAccumulated);
+                                // Highlight new code blocks
+                                body.querySelectorAll('pre code:not(.hljs)').forEach(c => hljs.highlightElement(c));
+                                if (firstChunk) {
+                                    firstChunk = false;
+                                    body.scrollTop = 0;
+                                }
+                            } else if (msg.type === 'done') {
+                                // Final render + MathJax
+                                body.innerHTML = marked.parse(mdAccumulated);
+                                body.querySelectorAll('pre code').forEach(c => hljs.highlightElement(c));
+                                if (window.MathJax) MathJax.typesetPromise();
+                            } else if (msg.type === 'error') {
+                                body.innerHTML = `<p style="color:var(--text-secondary)">Error: ${msg.error}</p>`;
+                            }
+                        } catch (e) { /* skip malformed line */ }
+                    }
+                }
+            } catch (err) {
+                body.innerHTML = '<p style="color:var(--text-secondary)">Failed to load content.</p>';
+            }
+        }
+
+        function buildFilterUI(groups) {
+            const container = document.getElementById("filter-list");
+            container.innerHTML = '';
+            const groupColors = ['var(--gold)', '#42b983', '#3498db', '#e74c3c', '#9b59b6', '#f1c40f'];
+            Object.entries(groups).forEach(([gid, label]) => {
+                const el = document.createElement('label');
+                el.className = 'filter-label';
+                const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${groupColors[gid] || '#888'};margin-right:4px;"></span>`;
+                el.innerHTML = `<input type="checkbox" data-group="${gid}" checked> ${dot}${label}`;
+                el.querySelector('input').addEventListener('change', updateFilter);
+                container.appendChild(el);
+            });
         }
 
         function updateFilter() {
-            const showC = document.getElementById("filter-core").checked, showL = document.getElementById("filter-logs").checked, showA = document.getElementById("filter-assets").checked;
-            curNodes = allNodesData.filter(n => (n.id==="MEMORY"?showC : (n.group===1?showL : showA)));
+            const checkedGroups = new Set();
+            document.querySelectorAll('#filter-list input[type=checkbox]').forEach(cb => {
+                if (cb.checked) checkedGroups.add(Number(cb.dataset.group));
+            });
+            curNodes = allNodesData.filter(n => checkedGroups.has(n.group));
             const ids = new Set(curNodes.map(n => n.id));
             curLinks = JSON.parse(JSON.stringify(allLinksData)).filter(l => ids.has(l.source) && ids.has(l.target));
             renderGraph(curNodes, curLinks);
         }
 
-        function closePanel() { panel.classList.remove("open"); selectedId = null; d3.selectAll(".node-group").classed("selected", false); document.getElementById("node-config").style.display = "none"; }
-        function resetWidth() { panel.style.width = "500px"; }
+        function closePanel() {
+            panel.classList.remove("open");
+            overlay.classList.remove("visible");
+            selectedId = null;
+            d3.selectAll(".node-group").classed("selected", false);
+            document.getElementById("node-config").style.display = "none";
+        }
+        function resetWidth() { if (!isMobile()) panel.style.width = "480px"; }
         let isR = false; resizer.onmousedown = () => isR = true;
         document.onmousemove = (e) => { if(!isR)return; const nw = window.innerWidth - e.clientX; if(nw>300 && nw < window.innerWidth*0.8) panel.style.width = nw+"px"; };
         document.onmouseup = () => isR = false;
@@ -233,6 +772,204 @@
         function dragstarted(e,d){ if(!e.active) simulation.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; }
         function dragged(e,d){ d.fx=e.x; d.fy=e.y; }
         function dragended(e,d){ if(!e.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; }
+
+        // === Settings Panel Logic ===
+        let _settingsPaths = [];
+
+        async function openSettings() {
+            try {
+                const res = await fetch('/api/config');
+                const config = await res.json();
+                _settingsPaths = [...(config.scan_paths || [])];
+                document.getElementById('core-mem-input').value = config.core_memory_file || '';
+                renderPathList();
+                document.getElementById('settings-overlay').classList.add('open');
+            } catch (err) {
+                showToast('Failed to load config');
+            }
+        }
+
+        function closeSettings() {
+            document.getElementById('settings-overlay').classList.remove('open');
+        }
+
+        function renderPathList() {
+            const list = document.getElementById('path-list');
+            list.innerHTML = '';
+            _settingsPaths.forEach((p, i) => {
+                const li = document.createElement('li');
+                li.className = 'path-item';
+                li.innerHTML = `<span>${p}</span><button onclick="removePath(${i})" aria-label="Remove">&times;</button>`;
+                list.appendChild(li);
+            });
+        }
+
+        function addPath() {
+            const input = document.getElementById('new-path-input');
+            const val = input.value.trim();
+            if (val && !_settingsPaths.includes(val)) {
+                _settingsPaths.push(val);
+                renderPathList();
+                input.value = '';
+            }
+        }
+
+        function removePath(index) {
+            _settingsPaths.splice(index, 1);
+            renderPathList();
+        }
+
+        async function saveSettings() {
+            const config = {
+                scan_paths: _settingsPaths,
+                core_memory_file: document.getElementById('core-mem-input').value.trim()
+            };
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    closeSettings();
+                    showToast('Config saved. Refreshing...');
+                    setTimeout(() => refreshGraph(), 500);
+                } else {
+                    showToast('Error: ' + (data.error || 'Unknown'));
+                }
+            } catch (err) {
+                showToast('Save failed');
+            }
+        }
+
+        function refreshGraph() {
+            d3.json('/api/graph').then(graph => {
+                groupLabels = graph.groups || {};
+                buildFilterUI(groupLabels);
+                const MEMORY_RADIUS = 22;
+                const sizes = graph.nodes.map(n => n.size || 0);
+                const maxSize = Math.max(...sizes, 1);
+                const sizeScale = d3.scaleSqrt().domain([0, maxSize]).range([5, MEMORY_RADIUS - 2]).clamp(true);
+                allNodesData = graph.nodes.map(n => ({...n, customColor: null, r: n.id === 'MEMORY' ? MEMORY_RADIUS : sizeScale(n.size || 0)}));
+                allLinksData = graph.links;
+                updateFilter();
+            });
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('settings-toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        // Enter key to add path
+        document.getElementById('new-path-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addPath();
+        });
+
+        // === Search Dropdown Logic ===
+        let _searchActiveIdx = -1;
+
+        function updateSearchDropdown(term) {
+            const dropdown = document.getElementById('search-dropdown');
+            _searchActiveIdx = -1;
+            if (!term) {
+                dropdown.classList.remove('open');
+                return;
+            }
+            // Score and sort: startsWith > includes, shorter id = better
+            const scored = allNodesData
+                .filter(n => n.id.toLowerCase().includes(term))
+                .map(n => {
+                    const lower = n.id.toLowerCase();
+                    const idx = lower.indexOf(term);
+                    const startBonus = idx === 0 ? 1000 : 0;
+                    const lengthPenalty = n.id.length;
+                    return { node: n, score: startBonus - lengthPenalty + (100 - idx) };
+                })
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 15);
+
+            if (scored.length === 0) {
+                dropdown.innerHTML = '<div class="search-no-result">No results</div>';
+                dropdown.classList.add('open');
+                return;
+            }
+
+            dropdown.innerHTML = scored.map((s, i) => {
+                const name = s.node.id;
+                const lower = name.toLowerCase();
+                const idx = lower.indexOf(term);
+                const before = name.substring(0, idx);
+                const match = name.substring(idx, idx + term.length);
+                const after = name.substring(idx + term.length);
+                const groupName = groupLabels[s.node.group] || '';
+                return `<div class="search-item" data-id="${name}" data-index="${i}">`
+                    + `<span>${before}<span class="match-highlight">${match}</span>${after}</span>`
+                    + (groupName ? `<span class="search-group">${groupName}</span>` : '')
+                    + `</div>`;
+            }).join('');
+
+            dropdown.querySelectorAll('.search-item').forEach(el => {
+                el.addEventListener('click', () => selectSearchResult(el.dataset.id));
+            });
+            dropdown.classList.add('open');
+        }
+
+        function selectSearchResult(id) {
+            document.getElementById('search-dropdown').classList.remove('open');
+            document.getElementById('search-input').value = id;
+            const target = allNodesData.find(n => n.id === id);
+            if (target) {
+                // Zoom to node
+                const k = 2.5;
+                const x = width / 2 - target.x * k;
+                const y = height / 2 - target.y * k;
+                svg.transition().duration(800).call(
+                    d3.zoom().transform,
+                    d3.zoomIdentity.translate(x, y).scale(k)
+                );
+                // Select node via selectNode (reuse full logic)
+                const nodeEl = d3.selectAll('.node-group').filter(d => d.id === target.id);
+                if (!nodeEl.empty()) {
+                    selectNode(target, nodeEl.node());
+                    // Add highlight pulse animation
+                    nodeEl.select('circle').classed('search-highlight', false);
+                    // Force reflow to restart animation
+                    void nodeEl.select('circle').node().offsetWidth;
+                    nodeEl.select('circle').classed('search-highlight', true);
+                    setTimeout(() => nodeEl.select('circle').classed('search-highlight', false), 1500);
+                }
+            }
+        }
+
+        // Keyboard navigation in dropdown
+        document.getElementById('search-input').addEventListener('keydown', (e) => {
+            const dropdown = document.getElementById('search-dropdown');
+            const items = dropdown.querySelectorAll('.search-item');
+            if (!items.length || !dropdown.classList.contains('open')) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                _searchActiveIdx = Math.min(_searchActiveIdx + 1, items.length - 1);
+                items.forEach((el, i) => el.classList.toggle('active', i === _searchActiveIdx));
+                items[_searchActiveIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                _searchActiveIdx = Math.max(_searchActiveIdx - 1, 0);
+                items.forEach((el, i) => el.classList.toggle('active', i === _searchActiveIdx));
+                items[_searchActiveIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (_searchActiveIdx >= 0 && items[_searchActiveIdx]) {
+                    selectSearchResult(items[_searchActiveIdx].dataset.id);
+                }
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('open');
+            }
+        });
     </script>
 </body>
 </html>

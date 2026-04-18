@@ -1,29 +1,47 @@
 #!/usr/bin/env python3
 import os
 import re
+import json
 from datetime import datetime, timedelta
 import random
 from typing import Dict, List, Any
 
-# --- Dynamic Path Resolution ---
-# Use expanduser to avoid hardcoding local Windows username
-BASE_USER_PATH = os.path.expanduser("~")
-DEFAULT_MEMORY_PATH = os.path.join(BASE_USER_PATH, ".openclaw", "workspace", "memory")
-DEFAULT_CORE_MEM_FILE = os.path.join(BASE_USER_PATH, ".openclaw", "workspace", "MEMORY.md")
+# --- Load Configuration (with hot-reload) ---
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_PATH = os.path.join(ROOT_DIR, "config.json")
 
-# Allow override via environment variables for D drive or custom paths
-SCAN_PATHS = os.environ.get("STAR_SCAN_PATHS", "").split(",")
-if not any(SCAN_PATHS):
-    # Fallback to current machine defaults if no env var provided
-    SCAN_PATHS = [DEFAULT_MEMORY_PATH, r"D:\openclaw\color_science_documents"]
+_config_cache = {}
+_config_mtime = 0
 
-CORE_MEM_FILE = os.environ.get("STAR_CORE_MEM", DEFAULT_CORE_MEM_FILE)
+def _load_config() -> dict:
+    """Load configuration from config.json, auto-reload on file change."""
+    global _config_cache, _config_mtime
+    try:
+        mtime = os.path.getmtime(CONFIG_PATH)
+        if mtime != _config_mtime:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                _config_cache = json.load(f)
+            _config_mtime = mtime
+    except Exception:
+        _config_cache = {}
+    return _config_cache
+
+def get_scan_paths() -> List[str]:
+    """Get scan paths from config (hot-reloaded)."""
+    config = _load_config()
+    return [os.path.expanduser(p) for p in config.get("scan_paths", [])]
+
+def get_core_mem_file() -> str:
+    """Get core memory file path from config (hot-reloaded)."""
+    config = _load_config()
+    return os.path.expanduser(config.get("core_memory_file", ""))
 
 def get_all_md_files() -> List[str]:
     md_files = []
-    if os.path.exists(CORE_MEM_FILE):
-        md_files.append(CORE_MEM_FILE)
-    for path in SCAN_PATHS:
+    core_mem = get_core_mem_file()
+    if core_mem and os.path.exists(core_mem):
+        md_files.append(core_mem)
+    for path in get_scan_paths():
         path = path.strip()
         if not path or not os.path.exists(path): continue
         for root, dirs, files in os.walk(path):
@@ -58,14 +76,36 @@ def extract_memo_from_file(file_path: str) -> str:
 def build_memory_graph() -> Dict[str, Any]:
     nodes = []
     links = []
-    file_map = {} 
+    file_map = {}
     all_files = get_all_md_files()
+    scan_paths = get_scan_paths()
+    core_mem = get_core_mem_file()
+
+    # Build group labels: 0 = Core, 1..N = scan paths (by folder name)
+    group_labels = {0: "Core (MEMORY)"}
+    for i, sp in enumerate(scan_paths):
+        folder_name = os.path.basename(os.path.normpath(sp))
+        group_labels[i + 1] = folder_name
+
+    def _get_group(path: str) -> int:
+        """Determine group index by matching scan path."""
+        norm_path = os.path.normpath(path)
+        if core_mem and os.path.normpath(core_mem) == norm_path:
+            return 0
+        for i, sp in enumerate(scan_paths):
+            if norm_path.startswith(os.path.normpath(sp)):
+                return i + 1
+        return len(scan_paths)  # fallback group
+
     for path in all_files:
         name = os.path.basename(path).replace(".md", "").strip()
         file_map[name] = path
-        # 1 for workspace, 2 for external/archive
-        group = 1 if ".openclaw" in path.lower() else 2
-        nodes.append({"id": name, "group": group})
+        group = _get_group(path)
+        try:
+            file_size = os.path.getsize(path)
+        except Exception:
+            file_size = 0
+        nodes.append({"id": name, "group": group, "size": file_size})
 
     link_pattern = re.compile(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]')
     for name, path in file_map.items():
@@ -83,4 +123,4 @@ def build_memory_graph() -> Dict[str, Any]:
         for node in nodes:
             if node["id"] != "MEMORY":
                 links.append({"source": "MEMORY", "target": node["id"], "value": 0.5})
-    return {"nodes": nodes, "links": links}
+    return {"nodes": nodes, "links": links, "groups": group_labels}
