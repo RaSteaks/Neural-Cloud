@@ -56,6 +56,16 @@ def api_content():
             except: return match.group(0)
             
         processed_content = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', img_replacer, content)
+
+        # Also proxy HTML <img> tags
+        def html_img_replacer(match):
+            try:
+                prefix, img_p, quote = match.group(1), match.group(2), match.group(3)
+                img_p_u = urllib.parse.unquote(img_p)
+                full_p = img_p_u if ":" in img_p_u or img_p_u.startswith(("/", "\\")) else os.path.abspath(os.path.join(os.path.dirname(target), img_p_u))
+                return f'{prefix}/api/image?path={urllib.parse.quote(full_p)}{quote}'
+            except: return match.group(0)
+        processed_content = re.sub(r'(<img[^>]*\ssrc=["\'])([^"\'>]+)(["\'])', html_img_replacer, processed_content)
         
         # PDF Detection
         pdf_link = None
@@ -101,7 +111,7 @@ def api_content_stream():
                 if os.path.exists(p_pdf):
                     pdf_link = f"/api/pdf?path={urllib.parse.quote(p_pdf)}"
                     break
-            yield json.dumps({"type": "meta", "id": decoded_id, "pdf_link": pdf_link}) + "\n"
+            yield json.dumps({"type": "meta", "id": decoded_id, "pdf_link": pdf_link, "file_path": target}) + "\n"
 
             with open(target, "r", encoding="utf-8") as f:
                 lines = f.readlines()
@@ -110,6 +120,15 @@ def api_content_stream():
             for i in range(0, len(lines), CHUNK_LINES):
                 chunk = "".join(lines[i:i+CHUNK_LINES])
                 chunk = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', img_replacer, chunk)
+                # Also proxy HTML <img> tags
+                def html_img_repl(match):
+                    try:
+                        prefix, img_p, quote = match.group(1), match.group(2), match.group(3)
+                        img_p_u = urllib.parse.unquote(img_p)
+                        full_p = img_p_u if ":" in img_p_u or img_p_u.startswith(("/", "\\")) else os.path.abspath(os.path.join(os.path.dirname(target), img_p_u))
+                        return f'{prefix}/api/image?path={urllib.parse.quote(full_p)}{quote}'
+                    except: return match.group(0)
+                chunk = re.sub(r'(<img[^>]*\ssrc=["\'])([^"\'>]+)(["\'])', html_img_repl, chunk)
                 yield json.dumps({"type": "chunk", "content": chunk}) + "\n"
 
             yield json.dumps({"type": "done"}) + "\n"
@@ -121,15 +140,42 @@ def api_content_stream():
 
 @app.route("/api/image")
 def api_image():
-    """Media Proxy Hub"""
+    """Media Proxy Hub with fallback search"""
     p = request.args.get("path")
     if not p: return "400", 400
     p = os.path.normpath(urllib.parse.unquote(p))
+
+    # Direct path check
     if os.path.exists(p):
-        mime, _ = mimetypes.guess_type(p)
-        with open(p, "rb") as f:
-            return Response(f.read(), mimetype=mime or "application/octet-stream")
+        return _send_image(p)
+
+    # Fallback strategy: try inserting common subdirectories into the path
+    # e.g. .../imgs/ch1/img.png -> .../docs/imgs/ch1/img.png
+    parts = p.replace("\\", "/").split("/")
+    for i in range(len(parts) - 1, 0, -1):
+        for sub in ["docs", "doc", "assets", "resources", "src", "content", "static", "public"]:
+            candidate = os.path.normpath("/".join(parts[:i] + [sub] + parts[i:]))
+            if os.path.exists(candidate):
+                print(f"\033[33m[IMG FALLBACK] {p} -> {candidate}\033[0m")
+                return _send_image(candidate)
+
+    # Fallback 2: search by filename in scan_paths
+    filename = os.path.basename(p)
+    from backend.memo_utils import get_scan_paths
+    for sp in get_scan_paths():
+        for root, dirs, files in os.walk(sp):
+            if filename in files:
+                found = os.path.join(root, filename)
+                print(f"\033[33m[IMG FALLBACK] {p} -> {found}\033[0m")
+                return _send_image(found)
+
+    print(f"\033[31m[IMG 404] {p}\033[0m")
     return "404", 404
+
+def _send_image(path):
+    mime, _ = mimetypes.guess_type(path)
+    with open(path, "rb") as f:
+        return Response(f.read(), mimetype=mime or "application/octet-stream")
 
 @app.route("/api/pdf")
 def api_pdf():
@@ -148,6 +194,49 @@ def get_config():
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             return jsonify(json.load(f))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/browse")
+def api_browse():
+    """Browse local directories for folder picker"""
+    p = request.args.get("path", "").strip()
+    show_files = request.args.get("show_files", "").strip() == "1"
+    if not p:
+        # Return drive roots on Windows, / on Unix
+        if os.name == "nt":
+            import string
+            drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+            return jsonify({"current": "", "dirs": drives, "is_root": True})
+        else:
+            p = "/"
+
+    p = os.path.expanduser(p)
+    p = os.path.normpath(p)
+    if not os.path.isdir(p):
+        return jsonify({"error": "Not a directory"}), 400
+
+    try:
+        dirs = []
+        files = []
+        for name in sorted(os.listdir(p)):
+            full = os.path.join(p, name)
+            if os.path.isdir(full) and not name.startswith("."):
+                dirs.append(name)
+            elif show_files and os.path.isfile(full) and name.lower().endswith(".md"):
+                files.append(name)
+        parent = os.path.dirname(p)
+        result = {
+            "current": p,
+            "parent": parent if parent != p else None,
+            "dirs": dirs,
+            "is_root": False
+        }
+        if show_files:
+            result["files"] = files
+        return jsonify(result)
+    except PermissionError:
+        return jsonify({"current": p, "parent": os.path.dirname(p), "dirs": [], "is_root": False, "error": "Permission denied"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

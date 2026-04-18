@@ -157,6 +157,16 @@
         .panel-header-top {
             display: flex; align-items: center; justify-content: space-between; gap: 12px;
         }
+        #panel-filepath {
+            font-size: 11px; color: var(--text-secondary);
+            opacity: 0.6; margin: 4px 0 0 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            font-family: 'Courier New', monospace;
+            cursor: pointer;
+            transition: opacity var(--transition-fast);
+        }
+        #panel-filepath:hover { opacity: 1; }
+
         .panel-header-top h2 {
             margin: 0; font-size: 16px; font-weight: 600;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -210,8 +220,8 @@
         /* === Mobile Responsive === */
         @media (max-width: 768px) {
             #controls-container {
-                top: 12px; left: 12px; right: 12px;
-                max-width: none;
+                top: 12px; left: 12px; right: auto;
+                max-width: 260px;
             }
             #search-input { width: 100%; font-size: 16px; }
 
@@ -326,6 +336,53 @@
             padding: 14px 16px;
             font-size: 13px; color: var(--text-secondary);
             text-align: center;
+        }
+
+        /* === Folder Browser Modal === */
+        #folder-browser-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.6); z-index: 2100;
+            justify-content: center; align-items: center;
+        }
+        #folder-browser-overlay.open { display: flex; }
+        #folder-browser {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); width: 460px; max-width: 94vw;
+            max-height: 70vh; display: flex; flex-direction: column;
+            backdrop-filter: blur(20px);
+        }
+        .fb-header {
+            padding: 14px 18px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .fb-header h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+        .fb-path {
+            padding: 8px 18px; font-size: 11px; color: var(--text-secondary);
+            font-family: 'Courier New', monospace;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .fb-list {
+            flex: 1; overflow-y: auto; padding: 6px 0;
+            -webkit-overflow-scrolling: touch;
+        }
+        .fb-item {
+            padding: 9px 18px; font-size: 13px; color: var(--text-secondary);
+            cursor: pointer; display: flex; align-items: center; gap: 8px;
+            transition: background var(--transition-fast);
+        }
+        .fb-item:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+        .fb-file { color: var(--accent); }
+        .fb-item .fb-icon { font-size: 15px; }
+        .fb-item.fb-parent { color: var(--accent); font-weight: 500; }
+        .fb-footer {
+            padding: 12px 18px; border-top: 1px solid var(--border);
+            display: flex; gap: 8px; justify-content: flex-end;
+        }
+        .fb-footer .btn { font-size: 12px; padding: 6px 16px; }
+        .fb-empty { padding: 20px; text-align: center; font-size: 13px; color: var(--text-secondary); }
+        @media (max-width: 768px) {
+            #folder-browser { width: 100%; max-width: 100%; max-height: 80vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; align-self: flex-end; }
         }
 
         /* === Settings Modal === */
@@ -487,7 +544,10 @@
         <div id="resizer"></div>
         <div class="panel-header">
             <div class="panel-header-top">
-                <h2 id="panel-title"></h2>
+                <div style="min-width:0;flex:1">
+                    <h2 id="panel-title"></h2>
+                    <div id="panel-filepath" title="Click to copy"></div>
+                </div>
                 <button class="btn btn-close" onclick="closePanel()" aria-label="Close panel">CLOSE</button>
             </div>
             <div class="actions-bar">
@@ -516,12 +576,16 @@
                     <ul class="path-list" id="path-list"></ul>
                     <div class="path-add-row">
                         <input type="text" id="new-path-input" placeholder="Enter path, e.g. ~/notes">
+                        <button onclick="openFolderBrowser('scan')" title="Browse">&#128193;</button>
                         <button onclick="addPath()">Add</button>
                     </div>
                 </div>
                 <div class="settings-section">
                     <div class="settings-section-title">Core Memory File</div>
-                    <input type="text" class="settings-input" id="core-mem-input" placeholder="e.g. ~/.openclaw/workspace/MEMORY.md">
+                    <div style="display:flex;gap:6px">
+                        <input type="text" class="settings-input" id="core-mem-input" placeholder="e.g. ~/.openclaw/workspace/MEMORY.md" style="flex:1">
+                        <button class="btn" style="font-size:12px;padding:6px 10px;white-space:nowrap" onclick="openFolderBrowser('core')" title="Browse">&#128193;</button>
+                    </div>
                 </div>
             </div>
             <div class="settings-footer">
@@ -531,6 +595,22 @@
         </div>
     </div>
     <div class="settings-toast" id="settings-toast"></div>
+
+    <!-- Folder Browser Modal -->
+    <div id="folder-browser-overlay" onclick="if(event.target===this)closeFolderBrowser()">
+        <div id="folder-browser">
+            <div class="fb-header">
+                <h4>Select Folder</h4>
+                <button class="btn btn-close" onclick="closeFolderBrowser()" style="font-size:11px;padding:4px 10px">CLOSE</button>
+            </div>
+            <div class="fb-path" id="fb-current-path">Loading...</div>
+            <div class="fb-list" id="fb-list"></div>
+            <div class="fb-footer">
+                <button class="btn" onclick="closeFolderBrowser()">Cancel</button>
+                <button class="btn" style="background:var(--accent);color:#000;border-color:var(--accent)" onclick="selectCurrentFolder()">Select This Folder</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         const svg = d3.select("#graph"), width = window.innerWidth, height = window.innerHeight;
@@ -697,6 +777,9 @@
                                     pdfBtn.href = msg.pdf_link;
                                     pdfBtn.style.display = 'inline-flex';
                                 }
+                                const fpEl = document.getElementById('panel-filepath');
+                                fpEl.textContent = msg.file_path || '';
+                                fpEl.title = msg.file_path ? 'Click to copy: ' + msg.file_path : '';
                             } else if (msg.type === 'chunk') {
                                 mdAccumulated += msg.content;
                                 body.innerHTML = marked.parse(mdAccumulated);
@@ -711,6 +794,8 @@
                                 body.innerHTML = marked.parse(mdAccumulated);
                                 body.querySelectorAll('pre code').forEach(c => hljs.highlightElement(c));
                                 if (window.MathJax) MathJax.typesetPromise();
+                                // Intercept .md link clicks to open as nodes
+                                interceptMdLinks(body);
                             } else if (msg.type === 'error') {
                                 body.innerHTML = `<p style="color:var(--text-secondary)">Error: ${msg.error}</p>`;
                             }
@@ -720,6 +805,39 @@
             } catch (err) {
                 body.innerHTML = '<p style="color:var(--text-secondary)">Failed to load content.</p>';
             }
+        }
+
+        function interceptMdLinks(container) {
+            container.querySelectorAll('a[href]').forEach(a => {
+                const href = a.getAttribute('href');
+                if (!href) return;
+                // Match .md links (relative or absolute)
+                if (href.endsWith('.md') || href.match(/\.md[#?]/)) {
+                    a.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        // Extract filename without path and extension, decode URI
+                        let name = decodeURIComponent(href).split('/').pop().split('#')[0].split('?')[0].replace('.md', '');
+                        // Check if node exists
+                        const target = allNodesData.find(n => n.id === name || n.id.toLowerCase() === name.toLowerCase());
+                        if (target) {
+                            openNode(target.id);
+                            // Also zoom to it
+                            const k = 2.5;
+                            const x = width / 2 - target.x * k;
+                            const y = height / 2 - target.y * k;
+                            svg.transition().duration(800).call(
+                                d3.zoom().transform,
+                                d3.zoomIdentity.translate(x, y).scale(k)
+                            );
+                        } else {
+                            // Node not in graph, show toast
+                            showToast('Node not found: ' + name, true);
+                        }
+                    });
+                    a.style.cursor = 'pointer';
+                    a.title = 'Open node: ' + href.split('/').pop().replace('.md', '');
+                }
+            });
         }
 
         function buildFilterUI(groups) {
@@ -867,6 +985,107 @@
         // Enter key to add path
         document.getElementById('new-path-input').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') addPath();
+        });
+
+        // === Folder Browser Logic ===
+        let _fbMode = 'scan'; // 'scan' or 'core'
+        let _fbCurrentPath = '';
+
+        function openFolderBrowser(mode) {
+            _fbMode = mode;
+            _fbCurrentPath = '';
+            document.getElementById('folder-browser-overlay').classList.add('open');
+            browseTo(''); // start at root / drives
+        }
+
+        function closeFolderBrowser() {
+            document.getElementById('folder-browser-overlay').classList.remove('open');
+        }
+
+        async function browseTo(path) {
+            const list = document.getElementById('fb-list');
+            const pathEl = document.getElementById('fb-current-path');
+            list.innerHTML = '<div class="fb-empty">Loading...</div>';
+            pathEl.textContent = path || 'My Computer';
+
+            try {
+                let browseUrl = '/api/browse?path=' + encodeURIComponent(path);
+                if (_fbMode === 'core') browseUrl += '&show_files=1';
+                const res = await fetch(browseUrl);
+                const data = await res.json();
+                if (data.error && !data.dirs) {
+                    list.innerHTML = `<div class="fb-empty">${data.error}</div>`;
+                    return;
+                }
+
+                _fbCurrentPath = data.current || '';
+                pathEl.textContent = _fbCurrentPath || 'My Computer';
+
+                let html = '';
+                // Parent directory link
+                if (data.parent !== null && data.parent !== undefined) {
+                    html += `<div class="fb-item fb-parent" onclick="browseTo('${escPath(data.parent)}')">`
+                        + `<span class="fb-icon">&#8592;</span> ../ (Parent)</div>`;
+                } else if (!data.is_root && _fbCurrentPath) {
+                    html += `<div class="fb-item fb-parent" onclick="browseTo('')">`
+                        + `<span class="fb-icon">&#8592;</span> Drives</div>`;
+                }
+
+                for (const dir of data.dirs) {
+                    const fullPath = data.is_root ? dir : (_fbCurrentPath + '\\' + dir);
+                    html += `<div class="fb-item" onclick="browseTo('${escPath(fullPath)}')">`
+                        + `<span class="fb-icon">&#128193;</span> ${dir}</div>`;
+                }
+                // Show .md files in core mode
+                if (data.files && data.files.length > 0) {
+                    for (const file of data.files) {
+                        const fullPath = _fbCurrentPath + '\\' + file;
+                        html += `<div class="fb-item fb-file" onclick="selectFile('${escPath(fullPath)}')">`
+                            + `<span class="fb-icon">&#128196;</span> ${file}</div>`;
+                    }
+                }
+                if (!data.dirs.length && !(data.files && data.files.length)) {
+                    html += '<div class="fb-empty">Empty directory</div>';
+                }
+                list.innerHTML = html;
+            } catch (err) {
+                list.innerHTML = `<div class="fb-empty">Error: ${err.message}</div>`;
+            }
+        }
+
+        function escPath(p) {
+            return p.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        }
+
+        function selectFile(filePath) {
+            if (_fbMode === 'core') {
+                document.getElementById('core-mem-input').value = filePath;
+            }
+            closeFolderBrowser();
+        }
+
+        function selectCurrentFolder() {
+            if (!_fbCurrentPath) return;
+            if (_fbMode === 'scan') {
+                const input = document.getElementById('new-path-input');
+                input.value = _fbCurrentPath;
+                addPath();
+            } else if (_fbMode === 'core') {
+                document.getElementById('core-mem-input').value = _fbCurrentPath;
+            }
+            closeFolderBrowser();
+        }
+
+        // Click file path to copy
+        document.getElementById('panel-filepath').addEventListener('click', function() {
+            const path = this.textContent;
+            if (!path) return;
+            navigator.clipboard.writeText(path).then(() => {
+                const orig = this.textContent;
+                this.textContent = 'Copied!';
+                this.style.opacity = '1';
+                setTimeout(() => { this.textContent = orig; this.style.opacity = ''; }, 1200);
+            });
         });
 
         // === Search Dropdown Logic ===
