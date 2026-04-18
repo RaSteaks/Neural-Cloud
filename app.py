@@ -261,6 +261,17 @@ def save_config():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/restart", methods=["POST"])
+def api_restart():
+    """Restart the Flask server"""
+    import sys
+    import subprocess
+    python = sys.executable
+    script = sys.argv[0]
+    # Start new process and exit current
+    subprocess.Popen([python, script], creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0)
+    os._exit(0)
+
 if __name__ == "__main__":
     # Check config.json on startup, create default if missing
     config_path = os.path.join(ROOT_DIR, "config.json")

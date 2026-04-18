@@ -591,6 +591,7 @@
             <div class="settings-footer">
                 <button class="btn" onclick="closeSettings()">Cancel</button>
                 <button class="btn" style="background:var(--accent);color:#000;border-color:var(--accent)" onclick="saveSettings()">Save</button>
+                <button class="btn" style="background:#ff6b6b;color:#fff;border-color:#ff6b6b" onclick="restartBackend()" title="Restart backend server">&#128260; Restart</button>
             </div>
         </div>
     </div>
@@ -958,6 +959,20 @@
                 }
             } catch (err) {
                 showToast('Save failed');
+            }
+        }
+
+        async function restartBackend() {
+            if (!confirm('Restart backend server?\n\nNote: Current page will reload automatically.')) return;
+            try {
+                showToast('Restarting backend...');
+                await fetch('/api/restart', { method: 'POST' });
+                // Wait for server to restart
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } catch (err) {
+                showToast('Restart failed: ' + err.message);
             }
         }
 
