@@ -44,9 +44,10 @@ def get_all_md_files() -> List[str]:
     for path in get_scan_paths():
         path = path.strip()
         if not path or not os.path.exists(path): continue
-        for file in os.listdir(path):
-            if file.endswith(".md"):
-                md_files.append(os.path.abspath(os.path.join(path, file)))
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                if file.endswith(".md"):
+                    md_files.append(os.path.abspath(os.path.join(root, file)))
     return md_files
 
 def get_yesterday_date_str() -> str:
