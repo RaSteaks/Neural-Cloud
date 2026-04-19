@@ -587,6 +587,13 @@
                         <button class="btn" style="font-size:12px;padding:6px 10px;white-space:nowrap" onclick="openFolderBrowser('core')" title="Browse">&#128193;</button>
                     </div>
                 </div>
+                <div class="settings-section">
+                    <div class="settings-section-title">Preferences</div>
+                    <label class="path-item" style="cursor:pointer">
+                        <input type="checkbox" id="prefer-pdf-checkbox" style="margin-right:8px">
+                        <span>Prefer PDF over Markdown (show PDF when available)</span>
+                    </label>
+                </div>
             </div>
             <div class="settings-footer">
                 <button class="btn" onclick="closeSettings()">Cancel</button>
@@ -783,20 +790,28 @@
                                 fpEl.title = msg.file_path ? 'Click to copy: ' + msg.file_path : '';
                             } else if (msg.type === 'chunk') {
                                 mdAccumulated += msg.content;
-                                body.innerHTML = marked.parse(mdAccumulated);
-                                // Highlight new code blocks
-                                body.querySelectorAll('pre code:not(.hljs)').forEach(c => hljs.highlightElement(c));
+                                // Check if content is PDF embed (contains iframe)
+                                if (msg.content.includes('<iframe')) {
+                                    // Direct HTML render for PDF
+                                    body.innerHTML = msg.content;
+                                } else {
+                                    body.innerHTML = marked.parse(mdAccumulated);
+                                    // Highlight new code blocks
+                                    body.querySelectorAll('pre code:not(.hljs)').forEach(c => hljs.highlightElement(c));
+                                }
                                 if (firstChunk) {
                                     firstChunk = false;
                                     body.scrollTop = 0;
                                 }
                             } else if (msg.type === 'done') {
-                                // Final render + MathJax
-                                body.innerHTML = marked.parse(mdAccumulated);
-                                body.querySelectorAll('pre code').forEach(c => hljs.highlightElement(c));
-                                if (window.MathJax) MathJax.typesetPromise();
-                                // Intercept .md link clicks to open as nodes
-                                interceptMdLinks(body);
+                                // Final render + MathJax (only for MD content)
+                                if (!mdAccumulated.includes('<iframe')) {
+                                    body.innerHTML = marked.parse(mdAccumulated);
+                                    body.querySelectorAll('pre code').forEach(c => hljs.highlightElement(c));
+                                    if (window.MathJax) MathJax.typesetPromise();
+                                    // Intercept .md link clicks to open as nodes
+                                    interceptMdLinks(body);
+                                }
                             } else if (msg.type === 'error') {
                                 body.innerHTML = `<p style="color:var(--text-secondary)">Error: ${msg.error}</p>`;
                             }
@@ -901,6 +916,7 @@
                 const config = await res.json();
                 _settingsPaths = [...(config.scan_paths || [])];
                 document.getElementById('core-mem-input').value = config.core_memory_file || '';
+                document.getElementById('prefer-pdf-checkbox').checked = config.prefer_pdf || false;
                 renderPathList();
                 document.getElementById('settings-overlay').classList.add('open');
             } catch (err) {
@@ -941,7 +957,8 @@
         async function saveSettings() {
             const config = {
                 scan_paths: _settingsPaths,
-                core_memory_file: document.getElementById('core-mem-input').value.trim()
+                core_memory_file: document.getElementById('core-mem-input').value.trim(),
+                prefer_pdf: document.getElementById('prefer-pdf-checkbox').checked
             };
             try {
                 const res = await fetch('/api/config', {

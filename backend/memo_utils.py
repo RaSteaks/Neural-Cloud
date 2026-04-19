@@ -36,6 +36,11 @@ def get_core_mem_file() -> str:
     config = _load_config()
     return os.path.expanduser(config.get("core_memory_file", ""))
 
+def get_prefer_pdf() -> bool:
+    """Get prefer_pdf setting from config (hot-reloaded)."""
+    config = _load_config()
+    return config.get("prefer_pdf", False)
+
 def get_all_md_files() -> List[str]:
     md_files = []
     core_mem = get_core_mem_file()

@@ -86,11 +86,42 @@ def api_content_stream():
     if not node_id: return jsonify({"error": "No ID"}), 400
 
     decoded_id = urllib.parse.unquote(node_id).strip()
-    from backend.memo_utils import get_all_md_files
+    from backend.memo_utils import get_all_md_files, get_prefer_pdf
     files = get_all_md_files()
 
     target = next((p for p in files if os.path.basename(p).replace(".md", "").strip() in [decoded_id, decoded_id.replace(" ",""), node_id]), None)
     if not target: return jsonify({"error": f"NodeNotFound: {decoded_id}"}), 404
+
+    # Check if prefer_pdf is enabled and PDF exists
+    prefer_pdf = get_prefer_pdf()
+    pdf_path = None
+    if prefer_pdf:
+        bn = os.path.basename(target).replace(".md", "")
+        for p_pdf in [os.path.join(os.path.dirname(target), bn+".pdf"), os.path.join(os.path.dirname(os.path.dirname(target)), bn+".pdf")]:
+            if os.path.exists(p_pdf):
+                pdf_path = p_pdf
+                break
+
+    # If PDF exists and prefer_pdf is enabled, stream PDF content
+    if pdf_path:
+        def generate_pdf():
+            try:
+                pdf_url = f"/api/pdf?path={urllib.parse.quote(pdf_path)}"
+                # Send metadata with PDF indicator
+                yield json.dumps({"type": "meta", "id": decoded_id, "pdf_link": pdf_url, "file_path": pdf_path, "is_pdf": True}) + "\n"
+                # Send PDF embed HTML
+                pdf_html = f"""
+<div style="text-align:center;padding:10px;color:var(--text-secondary);font-size:12px;border-bottom:1px solid var(--border);margin-bottom:10px;">
+    📄 PDF Mode: <a href="{pdf_url}" target="_blank" style="color:var(--accent)">Open in new tab</a>
+</div>
+<iframe src="{pdf_url}" style="width:100%;height:calc(100vh - 200px);border:none;border-radius:8px;background:#fff;"></iframe>
+"""
+                yield json.dumps({"type": "chunk", "content": pdf_html}) + "\n"
+                yield json.dumps({"type": "done"}) + "\n"
+            except Exception as e:
+                yield json.dumps({"type": "error", "error": str(e)}) + "\n"
+        return Response(generate_pdf(), mimetype="application/x-ndjson",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     CHUNK_LINES = 40
 
@@ -251,9 +282,18 @@ def save_config():
         # Validate: scan_paths must be a list of strings
         if not isinstance(data["scan_paths"], list):
             return jsonify({"error": "scan_paths must be a list"}), 400
+        
+        # Read existing config to preserve other fields
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                existing_config = json.load(f)
+        except Exception:
+            existing_config = {}
+        
         config = {
             "scan_paths": [str(p).strip() for p in data["scan_paths"] if str(p).strip()],
-            "core_memory_file": str(data.get("core_memory_file", "")).strip()
+            "core_memory_file": str(data.get("core_memory_file", "")).strip(),
+            "prefer_pdf": data.get("prefer_pdf", existing_config.get("prefer_pdf", False))
         }
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
