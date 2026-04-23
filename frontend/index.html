@@ -9,6 +9,7 @@
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -287,6 +288,14 @@
         }
         #settings-btn:hover { color: var(--accent); border-color: var(--accent); transform: rotate(45deg); }
         #settings-btn:active { transform: scale(0.92); }
+
+        body.guest-mode #settings-btn,
+        body.guest-mode #node-config {
+            display: none !important;
+        }
+        body.guest-mode #panel-filepath.is-hidden {
+            display: none;
+        }
 
         .node.search-highlight {
             animation: pulse-highlight 1.5s ease-out;
@@ -624,22 +633,201 @@
         const svg = d3.select("#graph"), width = window.innerWidth, height = window.innerHeight;
         const g = svg.append("g");
         const panel = document.getElementById("preview-panel");
+        const appState = {
+            isGuestMode: window.location.pathname === '/guest',
+            publicConfig: null,
+            uiConfig: {
+                site_title: 'Neural Cloud',
+                guest_enabled: true,
+                guest_title: '',
+                guest_subtitle: 'Read-only access to the knowledge graph.',
+                show_file_paths_in_guest: false
+            }
+        };
         let allNodesData = [], allLinksData = [], curNodes = [], curLinks = [], selectedId = null;
-        
+        const markdownSanitizeConfig = {
+            USE_PROFILES: { html: true },
+            FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "input", "button", "textarea", "select", "option", "link", "meta"],
+            ALLOW_UNKNOWN_PROTOCOLS: false
+        };
+
+        function setPanelLoading(container) {
+            container.replaceChildren();
+            const loading = document.createElement('div');
+            loading.className = 'panel-loading';
+            container.appendChild(loading);
+        }
+
+        function setPanelMessage(container, message) {
+            container.replaceChildren();
+            const text = document.createElement('p');
+            text.style.color = 'var(--text-secondary)';
+            text.textContent = message;
+            container.appendChild(text);
+        }
+
+        function renderPdfPreview(container, pdfUrl) {
+            container.replaceChildren();
+
+            const info = document.createElement('div');
+            info.style.textAlign = 'center';
+            info.style.padding = '10px';
+            info.style.color = 'var(--text-secondary)';
+            info.style.fontSize = '12px';
+            info.style.borderBottom = '1px solid var(--border)';
+            info.style.marginBottom = '10px';
+            info.append('PDF Mode: ');
+
+            const link = document.createElement('a');
+            link.href = pdfUrl;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.style.color = 'var(--accent)';
+            link.textContent = 'Open in new tab';
+            info.appendChild(link);
+
+            const frame = document.createElement('iframe');
+            frame.src = pdfUrl;
+            frame.style.width = '100%';
+            frame.style.height = 'calc(100vh - 200px)';
+            frame.style.border = 'none';
+            frame.style.borderRadius = '8px';
+            frame.style.background = '#fff';
+
+            container.appendChild(info);
+            container.appendChild(frame);
+        }
+
+        function renderMarkdown(container, markdown) {
+            const rawHtml = marked.parse(markdown);
+            const sanitizedHtml = window.DOMPurify
+                ? DOMPurify.sanitize(rawHtml, markdownSanitizeConfig)
+                : rawHtml
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+            container.innerHTML = sanitizedHtml;
+            container.querySelectorAll('a[target="_blank"]').forEach(a => {
+                a.rel = 'noopener noreferrer';
+            });
+            container.querySelectorAll('pre code').forEach(c => hljs.highlightElement(c));
+        }
+
+        function createEmptyState(message, className = 'fb-empty') {
+            const el = document.createElement('div');
+            el.className = className;
+            el.textContent = message;
+            return el;
+        }
+
+        function createFolderItem({ label, icon, className = '', onClick }) {
+            const item = document.createElement('div');
+            item.className = `fb-item${className ? ` ${className}` : ''}`;
+            item.addEventListener('click', onClick);
+
+            const iconEl = document.createElement('span');
+            iconEl.className = 'fb-icon';
+            iconEl.textContent = icon;
+
+            const textEl = document.createElement('span');
+            textEl.textContent = label;
+
+            item.appendChild(iconEl);
+            item.appendChild(textEl);
+            return item;
+        }
+
+        function normalizeSearchText(text) {
+            return (text || '')
+                .toLowerCase()
+                .replace(/[^0-9a-z\u4e00-\u9fff]+/gi, '');
+        }
+
+        function buildSearchProjection(text) {
+            const original = text || '';
+            const normalizedChars = [];
+            const indexMap = [];
+
+            for (let i = 0; i < original.length; i++) {
+                const char = original[i];
+                if (/[0-9a-z\u4e00-\u9fff]/i.test(char)) {
+                    normalizedChars.push(char.toLowerCase());
+                    indexMap.push(i);
+                }
+            }
+
+            return {
+                original,
+                normalized: normalizedChars.join(''),
+                indexMap
+            };
+        }
+
+        function applyUiConfig(uiConfig = {}, publicConfig = {}) {
+            appState.uiConfig = { ...appState.uiConfig, ...uiConfig };
+            document.title = appState.uiConfig.site_title || 'Neural Cloud';
+
+            const searchInput = document.getElementById('search-input');
+            const restartBtn = document.querySelector('.settings-footer button[onclick="restartBackend()"]');
+            const filepath = document.getElementById('panel-filepath');
+            searchInput.placeholder = 'Search Neural Synapses...';
+
+            if (appState.isGuestMode) {
+                document.body.classList.add('guest-mode');
+                filepath.classList.toggle('is-hidden', !appState.uiConfig.show_file_paths_in_guest);
+            } else {
+                document.body.classList.remove('guest-mode');
+                filepath.classList.remove('is-hidden');
+            }
+
+            if (restartBtn) {
+                restartBtn.style.display = publicConfig.allow_restart ? '' : 'none';
+            }
+        }
+
+        async function loadPublicConfig(force = false) {
+            if (appState.publicConfig && !force) {
+                return appState.publicConfig;
+            }
+            const res = await fetch('/api/config');
+            if (!res.ok) {
+                throw new Error('Failed to load config');
+            }
+            const config = await res.json();
+            appState.publicConfig = config;
+            applyUiConfig(config.ui || {}, config);
+            return config;
+        }
+
+        const GRAPH_FORCES = {
+            linkDistance: 150,
+            linkStrength: 0.22,
+            chargeStrength: -320,
+            collisionPadding: 20
+        };
+
         let simulation = d3.forceSimulation()
-            .force("link", d3.forceLink().id(d => d.id).distance(220))
-            .force("charge", d3.forceManyBody().strength(-800))
+            .force("link", d3.forceLink()
+                .id(d => d.id)
+                .distance(GRAPH_FORCES.linkDistance)
+                .strength(GRAPH_FORCES.linkStrength))
+            .force("charge", d3.forceManyBody().strength(GRAPH_FORCES.chargeStrength))
             .force("center", d3.forceCenter(width / 2, height / 2))
-            .force("collision", d3.forceCollide().radius(d => (d.r || 8) + 30));
+            .force("collision", d3.forceCollide().radius(d => (d.r || 8) + GRAPH_FORCES.collisionPadding));
 
         let groupLabels = {};
 
-        d3.json("/api/graph").then(graph => {
-            // Store group labels and build dynamic filters
+        async function initApp() {
+            try {
+                await loadPublicConfig();
+            } catch (err) {
+                applyUiConfig();
+            }
+
+            const graph = await d3.json("/api/graph");
             groupLabels = graph.groups || {};
             buildFilterUI(groupLabels);
 
-            // Compute node radius based on file size using sqrt scale, capped below MEMORY node
             const MEMORY_RADIUS = 22;
             const sizes = graph.nodes.map(n => n.size || 0);
             const maxSize = Math.max(...sizes, 1);
@@ -648,6 +836,10 @@
             allLinksData = graph.links;
             updateFilter();
             setupInteractions();
+        }
+
+        initApp().catch(() => {
+            setPanelMessage(document.getElementById('panel-body'), 'Failed to initialize graph.');
         });
 
         function renderGraph(nodes, links) {
@@ -703,7 +895,7 @@
             setTimeout(() => circle.classed('search-highlight', false), 1500);
             
             const config = document.getElementById("node-config");
-            config.style.display = "block";
+            config.style.display = appState.isGuestMode ? "none" : "block";
             
             // Sync active color
             document.querySelectorAll(".color-circle").forEach(c => {
@@ -733,11 +925,11 @@
 
             ["filter-core","filter-logs","filter-assets"].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener("change", updateFilter); });
             document.getElementById("search-input").oninput = (e) => {
-                const term = e.target.value.trim().toLowerCase();
+                const term = e.target.value.trim();
                 updateSearchDropdown(term);
             };
             document.getElementById("search-input").addEventListener('focus', () => {
-                const term = document.getElementById("search-input").value.trim().toLowerCase();
+                const term = document.getElementById("search-input").value.trim();
                 if (term) updateSearchDropdown(term);
             });
             // Close dropdown on outside click
@@ -757,15 +949,20 @@
             document.getElementById("panel-title").innerText = id;
             const pdfBtn = document.getElementById("btn-raw-pdf"); pdfBtn.style.display = "none";
             const body = document.getElementById("panel-body");
-            body.innerHTML = '<div class="panel-loading"></div>';
+            setPanelLoading(body);
 
             try {
                 const response = await fetch(`/api/content/stream?id=` + encodeURIComponent(id));
+                if (!response.ok || !response.body) {
+                    setPanelMessage(body, 'Failed to load content.');
+                    return;
+                }
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
                 let mdAccumulated = '';
                 let firstChunk = true;
+                let isPdf = false;
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -785,41 +982,38 @@
                                     pdfBtn.href = msg.pdf_link;
                                     pdfBtn.style.display = 'inline-flex';
                                 }
+                                isPdf = Boolean(msg.is_pdf && msg.pdf_link);
+                                if (isPdf) {
+                                    renderPdfPreview(body, msg.pdf_link);
+                                }
                                 const fpEl = document.getElementById('panel-filepath');
-                                fpEl.textContent = msg.file_path || '';
-                                fpEl.title = msg.file_path ? 'Click to copy: ' + msg.file_path : '';
+                                const showPath = !appState.isGuestMode || appState.uiConfig.show_file_paths_in_guest;
+                                fpEl.classList.toggle('is-hidden', !showPath);
+                                fpEl.textContent = showPath ? (msg.display_path || '') : '';
+                                fpEl.title = showPath && msg.display_path ? 'Click to copy: ' + msg.display_path : '';
                             } else if (msg.type === 'chunk') {
                                 mdAccumulated += msg.content;
-                                // Check if content is PDF embed (contains iframe)
-                                if (msg.content.includes('<iframe')) {
-                                    // Direct HTML render for PDF
-                                    body.innerHTML = msg.content;
-                                } else {
-                                    body.innerHTML = marked.parse(mdAccumulated);
-                                    // Highlight new code blocks
-                                    body.querySelectorAll('pre code:not(.hljs)').forEach(c => hljs.highlightElement(c));
+                                if (!isPdf) {
+                                    renderMarkdown(body, mdAccumulated);
                                 }
                                 if (firstChunk) {
                                     firstChunk = false;
                                     body.scrollTop = 0;
                                 }
                             } else if (msg.type === 'done') {
-                                // Final render + MathJax (only for MD content)
-                                if (!mdAccumulated.includes('<iframe')) {
-                                    body.innerHTML = marked.parse(mdAccumulated);
-                                    body.querySelectorAll('pre code').forEach(c => hljs.highlightElement(c));
+                                if (!isPdf) {
+                                    renderMarkdown(body, mdAccumulated);
                                     if (window.MathJax) MathJax.typesetPromise();
-                                    // Intercept .md link clicks to open as nodes
                                     interceptMdLinks(body);
                                 }
                             } else if (msg.type === 'error') {
-                                body.innerHTML = `<p style="color:var(--text-secondary)">Error: ${msg.error}</p>`;
+                                setPanelMessage(body, `Error: ${msg.error}`);
                             }
                         } catch (e) { /* skip malformed line */ }
                     }
                 }
             } catch (err) {
-                body.innerHTML = '<p style="color:var(--text-secondary)">Failed to load content.</p>';
+                setPanelMessage(body, 'Failed to load content.');
             }
         }
 
@@ -858,14 +1052,31 @@
 
         function buildFilterUI(groups) {
             const container = document.getElementById("filter-list");
-            container.innerHTML = '';
+            container.replaceChildren();
             const groupColors = ['var(--gold)', '#42b983', '#3498db', '#e74c3c', '#9b59b6', '#f1c40f'];
             Object.entries(groups).forEach(([gid, label]) => {
                 const el = document.createElement('label');
                 el.className = 'filter-label';
-                const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${groupColors[gid] || '#888'};margin-right:4px;"></span>`;
-                el.innerHTML = `<input type="checkbox" data-group="${gid}" checked> ${dot}${label}`;
-                el.querySelector('input').addEventListener('change', updateFilter);
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.dataset.group = gid;
+                input.checked = true;
+                input.addEventListener('change', updateFilter);
+
+                const dot = document.createElement('span');
+                dot.style.display = 'inline-block';
+                dot.style.width = '8px';
+                dot.style.height = '8px';
+                dot.style.borderRadius = '50%';
+                dot.style.background = groupColors[gid] || '#888';
+                dot.style.marginRight = '4px';
+
+                const text = document.createTextNode(label);
+
+                el.appendChild(input);
+                el.append(' ');
+                el.appendChild(dot);
+                el.appendChild(text);
                 container.appendChild(el);
             });
         }
@@ -911,9 +1122,12 @@
         let _settingsPaths = [];
 
         async function openSettings() {
+            if (appState.isGuestMode) {
+                showToast('Guest mode is read-only');
+                return;
+            }
             try {
-                const res = await fetch('/api/config');
-                const config = await res.json();
+                const config = await loadPublicConfig(true);
                 _settingsPaths = [...(config.scan_paths || [])];
                 document.getElementById('core-mem-input').value = config.core_memory_file || '';
                 document.getElementById('prefer-pdf-checkbox').checked = config.prefer_pdf || false;
@@ -930,11 +1144,18 @@
 
         function renderPathList() {
             const list = document.getElementById('path-list');
-            list.innerHTML = '';
+            list.replaceChildren();
             _settingsPaths.forEach((p, i) => {
                 const li = document.createElement('li');
                 li.className = 'path-item';
-                li.innerHTML = `<span>${p}</span><button onclick="removePath(${i})" aria-label="Remove">&times;</button>`;
+                const text = document.createElement('span');
+                text.textContent = p;
+                const button = document.createElement('button');
+                button.setAttribute('aria-label', 'Remove');
+                button.textContent = '×';
+                button.addEventListener('click', () => removePath(i));
+                li.appendChild(text);
+                li.appendChild(button);
                 list.appendChild(li);
             });
         }
@@ -1037,7 +1258,7 @@
         async function browseTo(path) {
             const list = document.getElementById('fb-list');
             const pathEl = document.getElementById('fb-current-path');
-            list.innerHTML = '<div class="fb-empty">Loading...</div>';
+            list.replaceChildren(createEmptyState('Loading...'));
             pathEl.textContent = path || 'My Computer';
 
             try {
@@ -1046,47 +1267,54 @@
                 const res = await fetch(browseUrl);
                 const data = await res.json();
                 if (data.error && !data.dirs) {
-                    list.innerHTML = `<div class="fb-empty">${data.error}</div>`;
+                    list.replaceChildren(createEmptyState(data.error));
                     return;
                 }
 
                 _fbCurrentPath = data.current || '';
                 pathEl.textContent = _fbCurrentPath || 'My Computer';
-
-                let html = '';
-                // Parent directory link
+                list.replaceChildren();
                 if (data.parent !== null && data.parent !== undefined) {
-                    html += `<div class="fb-item fb-parent" onclick="browseTo('${escPath(data.parent)}')">`
-                        + `<span class="fb-icon">&#8592;</span> ../ (Parent)</div>`;
+                    list.appendChild(createFolderItem({
+                        label: '../ (Parent)',
+                        icon: '←',
+                        className: 'fb-parent',
+                        onClick: () => browseTo(data.parent)
+                    }));
                 } else if (!data.is_root && _fbCurrentPath) {
-                    html += `<div class="fb-item fb-parent" onclick="browseTo('')">`
-                        + `<span class="fb-icon">&#8592;</span> Drives</div>`;
+                    list.appendChild(createFolderItem({
+                        label: 'Roots',
+                        icon: '←',
+                        className: 'fb-parent',
+                        onClick: () => browseTo('')
+                    }));
                 }
 
                 for (const dir of data.dirs) {
                     const fullPath = data.is_root ? dir : (_fbCurrentPath + '\\' + dir);
-                    html += `<div class="fb-item" onclick="browseTo('${escPath(fullPath)}')">`
-                        + `<span class="fb-icon">&#128193;</span> ${dir}</div>`;
+                    list.appendChild(createFolderItem({
+                        label: dir,
+                        icon: '📁',
+                        onClick: () => browseTo(fullPath)
+                    }));
                 }
-                // Show .md files in core mode
                 if (data.files && data.files.length > 0) {
                     for (const file of data.files) {
                         const fullPath = _fbCurrentPath + '\\' + file;
-                        html += `<div class="fb-item fb-file" onclick="selectFile('${escPath(fullPath)}')">`
-                            + `<span class="fb-icon">&#128196;</span> ${file}</div>`;
+                        list.appendChild(createFolderItem({
+                            label: file,
+                            icon: '📄',
+                            className: 'fb-file',
+                            onClick: () => selectFile(fullPath)
+                        }));
                     }
                 }
-                if (!data.dirs.length && !(data.files && data.files.length)) {
-                    html += '<div class="fb-empty">Empty directory</div>';
+                if (!list.childNodes.length) {
+                    list.appendChild(createEmptyState('Empty directory'));
                 }
-                list.innerHTML = html;
             } catch (err) {
-                list.innerHTML = `<div class="fb-empty">Error: ${err.message}</div>`;
+                list.replaceChildren(createEmptyState(`Error: ${err.message}`));
             }
-        }
-
-        function escPath(p) {
-            return p.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         }
 
         function selectFile(filePath) {
@@ -1110,6 +1338,7 @@
 
         // Click file path to copy
         document.getElementById('panel-filepath').addEventListener('click', function() {
+            if (appState.isGuestMode && !appState.uiConfig.show_file_paths_in_guest) return;
             const path = this.textContent;
             if (!path) return;
             navigator.clipboard.writeText(path).then(() => {
@@ -1126,45 +1355,73 @@
         function updateSearchDropdown(term) {
             const dropdown = document.getElementById('search-dropdown');
             _searchActiveIdx = -1;
-            if (!term) {
+            const normalizedTerm = normalizeSearchText(term);
+            if (!normalizedTerm) {
                 dropdown.classList.remove('open');
                 return;
             }
-            // Score and sort: startsWith > includes, shorter id = better
+
             const scored = allNodesData
-                .filter(n => n.id.toLowerCase().includes(term))
                 .map(n => {
-                    const lower = n.id.toLowerCase();
-                    const idx = lower.indexOf(term);
+                    const projection = buildSearchProjection(n.id);
+                    const idx = projection.normalized.indexOf(normalizedTerm);
+                    if (idx === -1) return null;
                     const startBonus = idx === 0 ? 1000 : 0;
-                    const lengthPenalty = n.id.length;
-                    return { node: n, score: startBonus - lengthPenalty + (100 - idx) };
+                    const lengthPenalty = projection.normalized.length;
+                    return {
+                        node: n,
+                        projection,
+                        normalizedIndex: idx,
+                        score: startBonus - lengthPenalty + (100 - idx)
+                    };
                 })
+                .filter(Boolean)
                 .sort((a, b) => b.score - a.score)
                 .slice(0, 15);
 
             if (scored.length === 0) {
-                dropdown.innerHTML = '<div class="search-no-result">No results</div>';
+                dropdown.replaceChildren(createEmptyState('No results', 'search-no-result'));
                 dropdown.classList.add('open');
                 return;
             }
 
-            dropdown.innerHTML = scored.map((s, i) => {
+            dropdown.replaceChildren();
+            scored.forEach((s, i) => {
                 const name = s.node.id;
-                const lower = name.toLowerCase();
-                const idx = lower.indexOf(term);
-                const before = name.substring(0, idx);
-                const match = name.substring(idx, idx + term.length);
-                const after = name.substring(idx + term.length);
+                const startOriginal = s.projection.indexMap[s.normalizedIndex];
+                const endOriginal = s.projection.indexMap[s.normalizedIndex + normalizedTerm.length - 1];
+                const before = startOriginal === undefined ? name : name.substring(0, startOriginal);
+                const match = startOriginal === undefined || endOriginal === undefined
+                    ? name
+                    : name.substring(startOriginal, endOriginal + 1);
+                const after = startOriginal === undefined || endOriginal === undefined
+                    ? ''
+                    : name.substring(endOriginal + 1);
                 const groupName = groupLabels[s.node.group] || '';
-                return `<div class="search-item" data-id="${name}" data-index="${i}">`
-                    + `<span>${before}<span class="match-highlight">${match}</span>${after}</span>`
-                    + (groupName ? `<span class="search-group">${groupName}</span>` : '')
-                    + `</div>`;
-            }).join('');
+                const item = document.createElement('div');
+                item.className = 'search-item';
+                item.dataset.id = name;
+                item.dataset.index = i;
 
-            dropdown.querySelectorAll('.search-item').forEach(el => {
-                el.addEventListener('click', () => selectSearchResult(el.dataset.id));
+                const label = document.createElement('span');
+                label.append(document.createTextNode(before));
+
+                const matchEl = document.createElement('span');
+                matchEl.className = 'match-highlight';
+                matchEl.textContent = match;
+                label.appendChild(matchEl);
+                label.append(document.createTextNode(after));
+                item.appendChild(label);
+
+                if (groupName) {
+                    const group = document.createElement('span');
+                    group.className = 'search-group';
+                    group.textContent = groupName;
+                    item.appendChild(group);
+                }
+
+                item.addEventListener('click', () => selectSearchResult(name));
+                dropdown.appendChild(item);
             });
             dropdown.classList.add('open');
         }

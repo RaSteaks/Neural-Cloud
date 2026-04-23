@@ -9,9 +9,42 @@ from typing import Dict, List, Any
 # --- Load Configuration (with hot-reload) ---
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(ROOT_DIR, "config.json")
+CONFIG_TEMPLATE_PATH = os.path.join(ROOT_DIR, "config.template.json")
+
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "scan_paths": [],
+    "core_memory_file": "",
+    "prefer_pdf": False,
+    "ui": {
+        "site_title": "Neural Cloud",
+        "guest_enabled": True,
+        "guest_title": "",
+        "guest_subtitle": "Read-only access to the knowledge graph.",
+        "show_file_paths_in_guest": False,
+    },
+    "server": {
+        "host": "127.0.0.1",
+        "port": 19001,
+    },
+    "auth": {
+        "username": "",
+        "password": "",
+    },
+    "allow_restart": False,
+}
 
 _config_cache = {}
 _config_mtime = 0
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            merged[key] = _deep_merge(base[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 def _load_config() -> dict:
     """Load configuration from config.json, auto-reload on file change."""
@@ -20,11 +53,59 @@ def _load_config() -> dict:
         mtime = os.path.getmtime(CONFIG_PATH)
         if mtime != _config_mtime:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                _config_cache = json.load(f)
+                loaded = json.load(f)
+            _config_cache = _deep_merge(DEFAULT_CONFIG, loaded if isinstance(loaded, dict) else {})
             _config_mtime = mtime
     except Exception:
-        _config_cache = {}
+        _config_cache = _deep_merge(DEFAULT_CONFIG, {})
     return _config_cache
+
+
+def build_initial_config() -> Dict[str, Any]:
+    try:
+        with open(CONFIG_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            return _deep_merge(DEFAULT_CONFIG, loaded)
+    except Exception:
+        pass
+    return _deep_merge(DEFAULT_CONFIG, {})
+
+
+def get_full_config() -> Dict[str, Any]:
+    return _load_config()
+
+
+def get_public_config() -> Dict[str, Any]:
+    config = _load_config()
+    auth = config.get("auth", {})
+    return {
+        "scan_paths": config.get("scan_paths", []),
+        "core_memory_file": config.get("core_memory_file", ""),
+        "prefer_pdf": config.get("prefer_pdf", False),
+        "ui": {
+            "site_title": config.get("ui", {}).get("site_title", DEFAULT_CONFIG["ui"]["site_title"]),
+            "guest_enabled": bool(config.get("ui", {}).get("guest_enabled", DEFAULT_CONFIG["ui"]["guest_enabled"])),
+            "guest_title": config.get("ui", {}).get("guest_title", DEFAULT_CONFIG["ui"]["guest_title"]),
+            "guest_subtitle": config.get("ui", {}).get("guest_subtitle", DEFAULT_CONFIG["ui"]["guest_subtitle"]),
+            "show_file_paths_in_guest": bool(
+                config.get("ui", {}).get(
+                    "show_file_paths_in_guest",
+                    DEFAULT_CONFIG["ui"]["show_file_paths_in_guest"],
+                )
+            ),
+        },
+        "server": {
+            "host": config.get("server", {}).get("host", DEFAULT_CONFIG["server"]["host"]),
+            "port": config.get("server", {}).get("port", DEFAULT_CONFIG["server"]["port"]),
+        },
+        "auth": {
+            "enabled": bool(auth.get("username") and auth.get("password")),
+            "username": auth.get("username", ""),
+            "password_configured": bool(auth.get("password")),
+        },
+        "allow_restart": bool(config.get("allow_restart", False)),
+    }
 
 def get_scan_paths() -> List[str]:
     """Get scan paths from config (hot-reloaded)."""
@@ -41,6 +122,44 @@ def get_prefer_pdf() -> bool:
     config = _load_config()
     return config.get("prefer_pdf", False)
 
+
+def get_server_host() -> str:
+    config = _load_config()
+    return str(config.get("server", {}).get("host", DEFAULT_CONFIG["server"]["host"])).strip() or DEFAULT_CONFIG["server"]["host"]
+
+
+def get_server_port() -> int:
+    config = _load_config()
+    try:
+        return int(config.get("server", {}).get("port", DEFAULT_CONFIG["server"]["port"]))
+    except (TypeError, ValueError):
+        return DEFAULT_CONFIG["server"]["port"]
+
+
+def get_auth_credentials() -> tuple[str, str]:
+    config = _load_config()
+    auth = config.get("auth", {})
+    return str(auth.get("username", "")).strip(), str(auth.get("password", "")).strip()
+
+
+def get_allow_restart() -> bool:
+    config = _load_config()
+    return bool(config.get("allow_restart", False))
+
+
+def get_ui_config() -> Dict[str, Any]:
+    config = _load_config()
+    ui = config.get("ui", {})
+    return {
+        "site_title": str(ui.get("site_title", DEFAULT_CONFIG["ui"]["site_title"])).strip() or DEFAULT_CONFIG["ui"]["site_title"],
+        "guest_enabled": bool(ui.get("guest_enabled", DEFAULT_CONFIG["ui"]["guest_enabled"])),
+        "guest_title": str(ui.get("guest_title", DEFAULT_CONFIG["ui"]["guest_title"])).strip(),
+        "guest_subtitle": str(ui.get("guest_subtitle", DEFAULT_CONFIG["ui"]["guest_subtitle"])).strip() or DEFAULT_CONFIG["ui"]["guest_subtitle"],
+        "show_file_paths_in_guest": bool(
+            ui.get("show_file_paths_in_guest", DEFAULT_CONFIG["ui"]["show_file_paths_in_guest"])
+        ),
+    }
+
 def get_all_md_files() -> List[str]:
     md_files = []
     core_mem = get_core_mem_file()
@@ -54,6 +173,11 @@ def get_all_md_files() -> List[str]:
                 if file.endswith(".md"):
                     md_files.append(os.path.abspath(os.path.join(root, file)))
     return md_files
+
+
+def _read_text(file_path: str) -> str:
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
 
 def get_yesterday_date_str() -> str:
     yesterday = datetime.now() - timedelta(days=1)

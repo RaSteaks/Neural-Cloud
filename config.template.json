@@ -1,0 +1,21 @@
+{
+    "scan_paths": [],
+    "core_memory_file": "",
+    "prefer_pdf": false,
+    "ui": {
+        "site_title": "Neural Cloud",
+        "guest_enabled": true,
+        "guest_title": "",
+        "guest_subtitle": "Read-only access to the knowledge graph.",
+        "show_file_paths_in_guest": false
+    },
+    "server": {
+        "host": "127.0.0.1",
+        "port": 19001
+    },
+    "auth": {
+        "username": "",
+        "password": ""
+    },
+    "allow_restart": false
+}
